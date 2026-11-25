@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '11.0.x'
+
+      - name: Build
+        run: dotnet build src/SecretsManager.App -c Release -p:Platform=x64
+
+      # SecretsServiceTests drive the real SecretManagement module against tests/TestVault (never SecretStore).
+      - name: Install SecretManagement
+        shell: pwsh
+        run: Install-PSResource Microsoft.PowerShell.SecretManagement -Scope CurrentUser -TrustRepository
+
+      # Unit and integration tests. The UI test (tests/Invoke-AppUiTest.ps1) and the explicit real-SecretStore
+      # tests need a desktop session and a real store, so they run locally only.
+      - name: Test
+        run: dotnet test --project tests/SecretsManager.Core.Tests -c Release
