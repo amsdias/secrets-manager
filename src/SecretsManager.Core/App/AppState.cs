@@ -85,8 +85,12 @@ public sealed record EditorState
 
 public sealed record ViewerState(SecretEntry Entry, SecretValue Value, bool Reveal = false);
 
+public enum VaultKind { SecretStore, WindowsAccount, Other }
+
 public sealed record VaultFormState
 {
+    /// <summary>SecretStore: password or Windows account (one per user). WindowsAccount: the app's DPAPI vault, never asks.</summary>
+    public VaultKind Kind { get; init; } = VaultKind.SecretStore;
     public string Name { get; init; } = "";
     public string ModuleName { get; init; } = VaultInfo.SecretStoreModule;
     public string Description { get; init; } = "";
@@ -124,6 +128,9 @@ public sealed record AppState
     public string? Error { get; init; }
     public bool SecretStoreAvailable { get; init; }
     public int? ClipboardSecondsLeft { get; init; }
+    /// <summary>Windows Hello is set up on this PC / unlocks the SecretStore.</summary>
+    public bool HelloAvailable { get; init; }
+    public bool HelloEnabled { get; init; }
     public AppSettings Settings { get; init; } = new();
     /// <summary>Lock after this many idle minutes; 0 = off.</summary>
     public int AutoLockMinutes => Settings.AutoLockMinutes;

@@ -6,12 +6,15 @@
 
     Run: pwsh -NoProfile -File tests/Invoke-AppUiTest.ps1 [-Configuration Debug] [-ExePath publish\SecretsManager.exe]
 #>
-param([string]$Configuration = 'Debug', [string]$ExePath, [string]$ScreenshotDir)
+param([string]$Configuration = 'Debug', [string]$ExePath, [string]$ScreenshotDir, [string]$CliPath)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 Import-Module Microsoft.PowerShell.SecretManagement
 
 $exe = if ($ExePath) { $ExePath } else { Join-Path $PSScriptRoot "..\src\SecretsManager.App\bin\x64\$Configuration\net11.0-windows10.0.22621.0\SecretsManager.exe" }
+$cli = if ($CliPath) { $CliPath } elseif ($ExePath) { Join-Path (Split-Path $ExePath) 'SecretsManager.Cli.exe' } else {
+    Join-Path $PSScriptRoot "..\src\SecretsManager.Cli\bin\$Configuration\net11.0\SecretsManager.Cli.exe" }
+if (-not (Test-Path $cli)) { throw "Build the CLI first: dotnet build src/SecretsManager.Cli ($cli not found)" }
 if (-not (Test-Path $exe)) { throw "Build the app first: dotnet build src/SecretsManager.App -p:Platform=x64 ($exe not found)" }
 
 $AE = [System.Windows.Automation.AutomationElement]
@@ -180,8 +183,10 @@ try {
     #     failed in the published app when PowerShell's built-in modules weren't next to System.Management.Automation.dll.
     $byName = "SgUiByName_$suffix"
     Invoke-El (ById 'RegisterVaultButton')
+    [void](Wait-For { ById 'VaultNameBox' } 'register form')
+    Select-ComboItem 'VaultKindCombo' 'Other extension module'
     Set-Val (Wait-For { ById 'VaultNameBox' } 'register form') $byName
-    Set-Val (ById 'VaultModuleBox') $vaultModule
+    Set-Val (Wait-For { ById 'VaultModuleBox' } 'module box') $vaultModule
     Set-Val (ById 'VaultParametersBox') "Path=$tmp$byName.clixml"
     $default = ById 'VaultDefaultCheck'
     if ($default.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -eq 'On') {
@@ -213,6 +218,38 @@ try {
     Invoke-El (Wait-For { ByName 'Open' $CT::Button } 'Open button in the dialog')
     [void](Wait-For { (Get-Value $byName existing) -eq 'hello' } 'imported secret in the new vault')
     Pass 'export file imported into another vault'
+
+    # --- a Windows-account vault (dev keys): created through the form, readable by plain Get-Secret and by "get"
+    $dev = "SgUiDev_$suffix"
+    $devFile = Join-Path $env:LOCALAPPDATA "SecretsManager\vaults\$dev.clixml"
+    Invoke-El (ById 'RegisterVaultButton')
+    [void](Wait-For { ById 'VaultNameBox' } 'register form')
+    Select-ComboItem 'VaultKindCombo' 'Windows account (never asks)'
+    Set-Val (ById 'VaultNameBox') $dev
+    $default = ById 'VaultDefaultCheck'
+    if ($default.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -eq 'On') {
+        $default.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+    }
+    Invoke-El (ById 'VaultSaveButton')
+    [void](Wait-For { -not (ById 'VaultNameBox') } 'register form to close')
+    Select-Row $dev 'VaultList'
+    Invoke-El (Wait-For { $b = ById 'NewSecretButton'; if ($b.Current.IsEnabled) { $b } } 'New secret enabled')
+    Set-Val (Wait-For { ById 'NameBox' } 'editor') 'devkey'
+    Select-ComboItem 'TypeCombo' 'String'
+    Set-Val (Wait-For { ById 'ValueBox' } 'value box') 'dev-value-123'
+    Invoke-El (ById 'SaveButton')
+    [void](Wait-For { -not (ById 'NameBox') } 'editor to close')
+    if ((Wait-For { Get-Value $dev devkey } 'devkey via Get-Secret') -ne 'dev-value-123') { throw 'Get-Secret returned the wrong dev value' }
+    if ((Get-Content $devFile -Raw) -match 'dev-value-123') { throw 'the Windows-account vault file contains plain text' }
+    Pass 'Windows-account vault: created in the app, encrypted on disk, readable by Get-Secret'
+    # SecretsManager.Cli.exe (console) relays to the exe under test: PowerShell doesn't capture a GUI exe's output.
+    $env:SECRETSMANAGER_APP = (Resolve-Path $exe).Path
+    $cliOut = & $cli get devkey --vault $dev
+    if ($LASTEXITCODE -ne 0 -or $cliOut -ne 'dev-value-123') { throw "get returned '$cliOut' (exit $LASTEXITCODE)" }
+    $null = & $cli get "missing-$suffix" 2>$null
+    if ($LASTEXITCODE -ne 1) { throw "get of a missing secret exited $LASTEXITCODE, expected 1" }
+    Remove-Item Env:SECRETSMANAGER_APP
+    Pass 'SecretsManager.Cli get prints a dev key without asking; exit 1 when missing'
 
     # --- copy starts the clipboard countdown
     Select-Row $locked 'VaultList'
@@ -248,7 +285,8 @@ try {
 }
 finally {
     if ($proc -and -not $proc.HasExited) { $proc.Kill() }
-    foreach ($v in $plain, $locked, "SgUiByName_$suffix") { Unregister-SecretVault -Name $v -ErrorAction SilentlyContinue }
+    foreach ($v in $plain, $locked, "SgUiByName_$suffix", "SgUiDev_$suffix") { Unregister-SecretVault -Name $v -ErrorAction SilentlyContinue }
+    Remove-Item (Join-Path $env:LOCALAPPDATA "SecretsManager\vaults\SgUiDev_$suffix.clixml") -ErrorAction SilentlyContinue
     Remove-Item (Join-Path $tmp "sg-settings-$suffix.json"), (Join-Path $tmp "sg-export-$suffix.smsecrets") -ErrorAction SilentlyContinue
     Remove-Item "$tmp$plain.clixml*", "$tmp$locked.clixml*", "$($tmp)SgUiByName_$($suffix).clixml*" -ErrorAction SilentlyContinue
 }

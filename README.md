@@ -64,6 +64,30 @@ dotnet publish src/SecretsManager.App -c Release -p:Platform=x64 -r win-x64 --se
 Keyboard: **Ctrl+N** new secret, **Ctrl+,** settings, **F5** refresh, **Ctrl+F** search, **Ctrl+E** edit, **Ctrl+L** lock, **F1** list of shortcuts.
 In the secret list: **Enter** view, **F2** edit, **Del** delete, **Ctrl+C** copy. **Esc** closes a side panel.
 
+## Dev keys, prod keys, and scripts (or Claude Code)
+
+Where a secret lives decides whether reading it asks for approval:
+
+| Vault type (Register…) | Reading it | Good for |
+| --- | --- | --- |
+| **Windows account** | never asks; encrypted for your Windows account (DPAPI), so anything running as you can read it | development keys |
+| **SecretStore with a password**, *Unlock with Windows Hello* on (Store settings) | asks for Windows Hello (PIN, face, fingerprint) every time, in the app and from the command line | production keys |
+
+With Hello unlock on, the store password is saved only sealed by a Windows Hello key in the TPM: nothing can read the store
+without a Hello check. Move a key between vaults with **Copy to vault…**.
+
+From a script, a terminal or Claude Code, use the console front end next to the app:
+
+```powershell
+$cli = "$env:LOCALAPPDATA\Programs\SecretsManager\SecretsManager.Cli.exe"
+& $cli get api-key                     # prints the value; exit 0 found, 1 not found, 2 cancelled/locked, 3 error
+& $cli get db-login --field username   # PSCredential: password by default, or the user name
+& $cli get api-key --vault Dev         # without --vault, password-free vaults are searched before SecretStore
+```
+
+Use a value inside the command instead of printing it, so it doesn't end up in logs or in a chat transcript:
+`$env:API_KEY = & $cli get api-key; ./deploy.ps1`. Windows-account vaults also work with plain `Get-Secret`.
+
 ## Security notes
 
 - Copies are **cleared from the clipboard after 30 s**, and on exit, if the clipboard still holds them. They are also kept out of

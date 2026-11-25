@@ -7,7 +7,8 @@ namespace SecretsManager.Core.App;
 /// The UI renders <see cref="State"/>, calls these methods, and answers <see cref="AppState.Prompt"/>
 /// via <see cref="CompletePrompt"/>. Methods return Tasks so tests can await whole flows.
 /// </summary>
-public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, TimeProvider? time = null, IAppSettingsStore? settings = null)
+public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, TimeProvider? time = null, IAppSettingsStore? settings = null,
+    IStorePasswordProvider? storePassword = null)
 {
     const int DefaultPasswordTimeout = 900;
     const int MaxFileBytes = 1024 * 1024;
@@ -28,6 +29,8 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
         get => _clipboardSecondsOverride ?? _state.Settings.ClipboardClearSeconds;
         init => _clipboardSecondsOverride = value;
     }
+    /// <summary>The installed SecretsManager.WindowsVault module (psd1 path), for registering Windows-account vaults.</summary>
+    public string? WindowsVaultModulePath { get; init; }
     /// <summary>PBKDF2 work factor for new export files (tests lower it).</summary>
     public int ExportIterations { get; init; } = SecretsExport.DefaultIterations;
     public AppState State => _state;
@@ -77,8 +80,20 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
         tcs?.TrySetResult(result);
     }
 
+    const string StoreLabel = "SecretStore";
+    bool IsStoreVault(string vault) => vault == StoreLabel || State.Vaults.Any(v => v.Name == vault && v.IsSecretStore);
+
+    /// <summary>Windows Hello first (if turned on), so the typed password is only the fallback.</summary>
+    async Task<string?> TryHelloPassword()
+    {
+        if (storePassword is not { IsEnabled: true }) return null;
+        try { return await storePassword.GetPasswordAsync(); }
+        catch (SecretsOperationException ex) { SetStatus("Windows Hello: " + ex.Message); return null; }
+    }
+
     async Task<string?> AskVaultPassword(string vault, int attempt)
     {
+        if (attempt == 1 && IsStoreVault(vault) && await TryHelloPassword() is { } fromHello) return fromHello;
         var message = attempt > 1
             ? $"The password was not accepted. Enter the password for '{vault}'."
             : $"'{vault}' is locked. Enter its password to unlock it.";
@@ -96,10 +111,10 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
         LockedRetry.RunAsync(op, vault, AskVaultPassword, pw => secrets.UnlockVaultAsync(vault, pw));
 
     Task<T> WithStore<T>(Func<Task<T>> op) =>
-        LockedRetry.RunAsync(op, "SecretStore", AskVaultPassword, secrets.UnlockStoreAsync);
+        LockedRetry.RunAsync(op, StoreLabel, AskVaultPassword, secrets.UnlockStoreAsync);
 
     Task WithStore(Func<Task> op) =>
-        LockedRetry.RunAsync(op, "SecretStore", AskVaultPassword, secrets.UnlockStoreAsync);
+        LockedRetry.RunAsync(op, StoreLabel, AskVaultPassword, secrets.UnlockStoreAsync);
 
     // ------------------------------------------------------------------ startup / vaults
 
@@ -107,7 +122,8 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
     {
         if (Interlocked.Exchange(ref _autoLockLoopStarted, 1) == 0) _ = AutoLockLoopAsync();
         var available = await secrets.IsSecretStoreModuleAvailableAsync();
-        Update(s => s with { SecretStoreAvailable = available });
+        var hello = storePassword is not null && await storePassword.IsAvailableAsync();
+        Update(s => s with { SecretStoreAvailable = available, HelloAvailable = hello, HelloEnabled = storePassword?.IsEnabled == true });
         await ReloadVaultsAsync(null);
         if (State.Vaults.IsEmpty && available &&
             await ConfirmAsync("Welcome", "No secret vaults are registered yet. Register a local SecretStore vault now?", "Register"))
@@ -180,9 +196,14 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
             SetStatus(State.IsStoreMissing ? "The SecretStore hasn't been created yet." : "This SecretStore doesn't use a password, so there is nothing to unlock.");
             return;
         }
-        var r = await AskAsync(new PromptRequest(PromptKind.Password, "Unlock vault", $"Enter the password for '{vault.Name}'.") { PrimaryText = "Unlock" });
-        if (r?.Password is null) return;
-        await secrets.UnlockVaultAsync(vault.Name, r.Password);
+        var password = vault.IsSecretStore ? await TryHelloPassword() : null;
+        if (password is null)
+        {
+            var r = await AskAsync(new PromptRequest(PromptKind.Password, "Unlock vault", $"Enter the password for '{vault.Name}'.") { PrimaryText = "Unlock" });
+            if (r?.Password is null) return;
+            password = r.Password;
+        }
+        await secrets.UnlockVaultAsync(vault.Name, password);
         SetStatus($"Vault '{vault.Name}' unlocked.");
         await LoadSecretsAsync();
     });
@@ -206,14 +227,22 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
         SetStatus($"Unregistered '{name}'.");
     });
 
-    public void OpenVaultForm() => Update(s => s with
+    public void OpenVaultForm() => Update(s =>
     {
-        VaultForm = new VaultFormState
+        // SecretStore first; once a SecretStore vault exists, suggest a Windows-account vault for keys used without approval.
+        var kind = s.SecretStoreAvailable && !s.Vaults.Any(v => v.IsSecretStore) ? VaultKind.SecretStore
+            : WindowsVaultModulePath is not null ? VaultKind.WindowsAccount : VaultKind.Other;
+        var name = kind switch { VaultKind.SecretStore => "SecretStore", VaultKind.WindowsAccount => "Dev", _ => "" };
+        if (s.Vaults.Any(v => v.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) name = "";
+        return s with
         {
-            Name = s.Vaults.Any(v => v.Name.Equals("SecretStore", StringComparison.OrdinalIgnoreCase)) ? "" : "SecretStore",
-            ModuleName = s.SecretStoreAvailable ? VaultInfo.SecretStoreModule : "",
-            MakeDefault = !s.Vaults.Any(v => v.IsDefault),
-        },
+            VaultForm = new VaultFormState
+            {
+                Kind = kind, Name = name,
+                ModuleName = kind == VaultKind.Other ? "" : VaultInfo.SecretStoreModule,
+                MakeDefault = !s.Vaults.Any(v => v.IsDefault),
+            },
+        };
     });
 
     public void UpdateVaultForm(Func<VaultFormState, VaultFormState> change) =>
@@ -228,7 +257,12 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
         try
         {
             var name = form.Name.Trim();
-            var module = form.ModuleName.Trim();
+            var module = form.Kind switch
+            {
+                VaultKind.SecretStore => VaultInfo.SecretStoreModule,
+                VaultKind.WindowsAccount => WindowsVaultModulePath ?? throw new InvalidOperationException("The Windows-account vault module is not installed."),
+                _ => form.ModuleName.Trim(),
+            };
             if (name.Length == 0) throw new FormatException("Enter a vault name.");
             if (module.Length == 0) throw new FormatException("Enter the extension module name or path.");
             var parameters = KeyValueText.Parse(form.ParametersText);
@@ -665,6 +699,8 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
                 password = r.Password;
             }
             await WithStore(() => secrets.SetStoreConfigAsync(new StoreConfig(st.Authentication, timeout, st.Interaction), password));
+            if (st.Authentication == StoreAuthentication.None) await DisableHelloQuietly();
+            else if (password is not null && storePassword is { IsEnabled: true }) await storePassword.EnableAsync(password);
             Update(s => s with { StoreSettings = null, StoreAuthentication = st.Authentication, Status = "SecretStore settings saved." });
         }
         catch (OperationCanceledException) { UpdateStoreSettings(x => x with { IsSaving = false }); }
@@ -676,7 +712,12 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
         var r = await AskAsync(new PromptRequest(PromptKind.ChangePassword, "Change SecretStore password", "Enter the current password and choose a new one.") { PrimaryText = "Change" });
         if (r?.CurrentPassword is null || r.Password is null) return;
         await secrets.ChangeStorePasswordAsync(r.CurrentPassword, r.Password);
-        SetStatus("SecretStore password changed.");
+        if (storePassword is { IsEnabled: true })
+        {
+            await storePassword.EnableAsync(r.Password); // re-seal the new password (asks for Windows Hello)
+            SetStatus("SecretStore password changed; Windows Hello unlocks the new one.");
+        }
+        else SetStatus("SecretStore password changed.");
     });
 
     /// <summary>DESTRUCTIVE: asks twice (confirm, then type RESET) before deleting every SecretStore secret.</summary>
@@ -693,8 +734,45 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
         { OptionText = "Don't use a password (protected only by your Windows account)" });
         if (pw is null) { SetStatus("Reset cancelled."); return; }
         await secrets.ResetStoreAsync(pw.Option ? null : pw.Password, DefaultPasswordTimeout);
+        await DisableHelloQuietly(); // the sealed password belonged to the old store
         Update(s => s with { StoreSettings = null, StoreAuthentication = pw.Option ? StoreAuthentication.None : StoreAuthentication.Password });
         await ReloadVaultsAsync(State.SelectedVault);
         SetStatus("SecretStore was reset.");
     });
+
+    // ------------------------------------------------------------------ Windows Hello
+
+    /// <summary>
+    /// Turns Windows Hello unlock on (asks for the store password once, checks it, then seals it with a Hello key) or off.
+    /// </summary>
+    public Task SetHelloEnabledAsync(bool enable) => Run(async () =>
+    {
+        if (storePassword is null || enable == State.HelloEnabled) return;
+        if (!enable)
+        {
+            await storePassword.DisableAsync();
+            Update(s => s with { HelloEnabled = false, Status = "Windows Hello unlock is off." });
+            return;
+        }
+        for (var attempt = 1; ; attempt++)
+        {
+            var r = await AskAsync(new PromptRequest(PromptKind.Password, "Unlock with Windows Hello", attempt == 1
+                ? "Enter the SecretStore password once. It is then saved encrypted with a Windows Hello key on this PC, and " +
+                  "Windows Hello (PIN, face or fingerprint) unlocks the store from then on, in the app and for 'SecretsManager.exe get'."
+                : "The password was not accepted. Enter the SecretStore password.") { PrimaryText = "Continue" });
+            if (r?.Password is not { Length: > 0 } password) { SetStatus("Windows Hello unlock was not turned on."); return; }
+            try { await secrets.UnlockStoreAsync(password); }
+            catch (SecretsOperationException) { continue; }
+            await storePassword.EnableAsync(password);
+            break;
+        }
+        Update(s => s with { HelloEnabled = true, Status = "Windows Hello now unlocks the SecretStore." });
+    });
+
+    async Task DisableHelloQuietly()
+    {
+        if (storePassword is not { IsEnabled: true }) return;
+        await storePassword.DisableAsync();
+        Update(s => s with { HelloEnabled = false });
+    }
 }

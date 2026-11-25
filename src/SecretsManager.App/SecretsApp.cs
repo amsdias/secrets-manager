@@ -132,7 +132,7 @@ sealed class SecretsApp : Component
                     Grid(columns: [GridSize.Star(), GridSize.Auto], rows: [GridSize.Auto],
                         VStack(0,
                             TextBlock(v.Name).SemiBold(),
-                            Caption(v.IsSecretStore ? "SecretStore" : v.ModuleName).Opacity(0.7)),
+                            Caption(v.KindLabel).Opacity(0.7)),
                         v.IsDefault ? Caption("default").Foreground(Theme.AccentText).VAlign(VerticalAlignment.Center).Grid(row: 0, column: 1) : null
                     ).Padding(0, 6, 0, 6))
                 .SelectionChanged(sel => _ = Store.SelectVaultAsync(sel.FirstOrDefault()?.Name))
@@ -333,7 +333,7 @@ sealed class SecretsApp : Component
         s.Editor is { } e ? EditorPanel(e) :
         s.Viewer is { } v ? ViewerPanel(v) :
         s.VaultForm is { } f ? VaultFormPanel(f, s) :
-        s.StoreSettings is { } st ? StoreSettingsPanel(st) :
+        s.StoreSettings is { } st ? StoreSettingsPanel(st, s) :
         s.IsSettingsOpen ? SettingsPanel(s.Settings) :
         Empty();
 
@@ -459,16 +459,32 @@ sealed class SecretsApp : Component
     Element VaultFormPanel(VaultFormState f, AppState s)
     {
         void Edit(Func<VaultFormState, VaultFormState> change) => Store.UpdateVaultForm(change);
+        VaultKind[] kinds = [VaultKind.SecretStore, VaultKind.WindowsAccount, VaultKind.Other];
+        string[] kindLabels = ["SecretStore", "Windows account (never asks)", "Other extension module"];
+        var about = f.Kind switch
+        {
+            VaultKind.SecretStore => s.SecretStoreAvailable
+                ? "Encrypted locally, with a password (which Windows Hello can unlock) or protected only by your Windows account. " +
+                  "One SecretStore per user: every SecretStore vault shares it. Good for production keys."
+                : "Microsoft.PowerShell.SecretStore is not installed.",
+            VaultKind.WindowsAccount => "Encrypted for your Windows account, with no password: the app, scripts and " +
+                "'SecretsManager.exe get' read it without asking. Good for development keys. Anything running as you can read it.",
+            _ => "Any installed SecretManagement extension (e.g. Az.KeyVault, SecretManagement.KeePass), by name or path.",
+        };
         return VStack(12,
             Subtitle("Register vault"),
+            ComboBox(kindLabels, Array.IndexOf(kinds, f.Kind), i => { if (i >= 0) Edit(x => x with { Kind = kinds[i] }); })
+                .Header("Type").AutomationId("VaultKindCombo").HAlign(HorizontalAlignment.Stretch),
+            Caption(about).TextWrapping().Opacity(0.7),
             TextBox(f.Name, v => Edit(x => x with { Name = v }), header: "Name").AutomationId("VaultNameBox"),
-            TextBox(f.ModuleName, v => Edit(x => x with { ModuleName = v }), header: "Extension module (name or path)").AutomationId("VaultModuleBox"),
-            Caption(s.SecretStoreAvailable
-                ? "Microsoft.PowerShell.SecretStore keeps secrets encrypted locally for your account. Any installed SecretManagement extension (e.g. Az.KeyVault, SecretManagement.KeePass) works too."
-                : "Microsoft.PowerShell.SecretStore is not installed; enter an installed SecretManagement extension module.").TextWrapping().Opacity(0.7),
+            f.Kind == VaultKind.Other
+                ? TextBox(f.ModuleName, v => Edit(x => x with { ModuleName = v }), header: "Extension module (name or path)").AutomationId("VaultModuleBox")
+                : null,
             TextBox(f.Description, v => Edit(x => x with { Description = v }), header: "Description (optional)").AutomationId("VaultDescriptionBox"),
-            TextBox(f.ParametersText, v => Edit(x => x with { ParametersText = v }), header: "Vault parameters (optional, key=value per line)")
-                .AcceptsReturn().MinHeight(60).AutomationId("VaultParametersBox"),
+            f.Kind == VaultKind.Other
+                ? TextBox(f.ParametersText, v => Edit(x => x with { ParametersText = v }), header: "Vault parameters (optional, key=value per line)")
+                    .AcceptsReturn().MinHeight(60).AutomationId("VaultParametersBox")
+                : null,
             CheckBox(f.MakeDefault, v => Edit(x => x with { MakeDefault = v }), "Make this the default vault").AutomationId("VaultDefaultCheck"),
             ErrorText(f.Error),
             Buttons(
@@ -477,7 +493,7 @@ sealed class SecretsApp : Component
         ).MinWidth(480).AutomationId("VaultFormPanel");
     }
 
-    Element StoreSettingsPanel(StoreSettingsState st)
+    Element StoreSettingsPanel(StoreSettingsState st, AppState s)
     {
         void Edit(Func<StoreSettingsState, StoreSettingsState> change) => Store.UpdateStoreSettings(change);
         StoreAuthentication[] auths = [StoreAuthentication.Password, StoreAuthentication.None];
@@ -495,6 +511,15 @@ sealed class SecretsApp : Component
             Caption(st.Interaction == StoreInteraction.Prompt
                 ? "Prompt: SecretStore asks on the console, which this app has none of; it will ask for the password itself. Choose None."
                 : "None: SecretStore never prompts; this app asks for the password when the store is locked (recommended).").TextWrapping().Opacity(0.7),
+            Border(Empty()).Height(1).Background(Theme.DividerStroke).Margin(0, 4, 0, 4),
+            s.HelloAvailable
+                ? CheckBox(s.HelloEnabled, on => _ = Store.SetHelloEnabledAsync(on), "Unlock with Windows Hello")
+                    .IsEnabled(st.Original.Authentication == StoreAuthentication.Password).AutomationId("HelloCheck")
+                : Caption("Windows Hello isn't set up on this PC (Settings > Accounts > Sign-in options).").TextWrapping().Opacity(0.7),
+            Caption(st.Original.Authentication == StoreAuthentication.Password
+                ? "The store password is saved sealed by a Windows Hello key on this PC. Every unlock, in this app or with " +
+                  "'SecretsManager.exe get', then asks for your PIN, face or fingerprint. Keep keys that should never ask in a Windows-account vault."
+                : "Only for a store with a password.").TextWrapping().Opacity(0.7),
             ErrorText(st.Error),
             Grid(columns: [GridSize.Star(), GridSize.Auto], rows: [GridSize.Auto],
                 HStack(8,

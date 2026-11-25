@@ -14,9 +14,16 @@ public sealed record VaultInfo(
 {
     public const string SecretStoreModule = "Microsoft.PowerShell.SecretStore";
 
+    public const string WindowsVaultModule = "SecretsManager.WindowsVault";
+
     public bool IsSecretStore =>
         ModuleName.Equals(SecretStoreModule, StringComparison.OrdinalIgnoreCase) ||
         ModuleName.Replace('/', '\\').Contains("\\" + SecretStoreModule, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The app's own DPAPI vault (src/WindowsVault): readable without a password or prompt.</summary>
+    public bool IsWindowsVault => ModuleName.Contains(WindowsVaultModule, StringComparison.OrdinalIgnoreCase);
+
+    public string KindLabel => IsSecretStore ? "SecretStore" : IsWindowsVault ? "Windows account" : ModuleName;
 }
 
 /// <summary>A secret's listing entry. Never carries the secret value.</summary>

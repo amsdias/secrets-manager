@@ -57,6 +57,52 @@ public class SecretsServiceTests(TestVaultFixture fx) : IClassFixture<TestVaultF
 {
     readonly SecretsService _svc = fx.Service;
 
+    static string WindowsVaultModule
+    {
+        get
+        {
+            for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+            {
+                var candidate = Path.Combine(dir.FullName, "src", "WindowsVault", "SecretsManager.WindowsVault", "SecretsManager.WindowsVault.psd1");
+                if (File.Exists(candidate)) return candidate;
+            }
+            throw new FileNotFoundException("src/WindowsVault module not found");
+        }
+    }
+
+    [Fact]
+    public async Task Windows_account_vault_round_trips_every_type_and_keeps_values_encrypted()
+    {
+        var name = "SgWv_" + Guid.NewGuid().ToString("N")[..8];
+        var path = Path.Combine(Path.GetTempPath(), name + ".clixml");
+        await _svc.RegisterVaultAsync(name, WindowsVaultModule, null, new Dictionary<string, string> { ["Path"] = path }, makeDefault: false);
+        try
+        {
+            Assert.True(Assert.Single(await _svc.GetVaultsAsync(), v => v.Name == name).IsWindowsVault);
+            SecretValue[] values =
+            [
+                new TextSecret("plain-dev"), new SecureTextSecret("hidden-dev"), new CredentialSecret("me", "pw-dev"),
+                new HashtableSecret(new Dictionary<string, string> { ["k"] = "v-dev" }), new BytesSecret([9, 8, 7]),
+            ];
+            foreach (var value in values)
+                await _svc.SetSecretAsync(name, value.Kind.ToString(), value, new Dictionary<string, string> { ["env"] = "dev" }, true);
+            var entries = await _svc.GetSecretsAsync(name);
+            Assert.Equal(values.Length, entries.Count);
+            foreach (var value in values)
+            {
+                var entry = entries.Single(e => e.Name == value.Kind.ToString());
+                Assert.Equal((value.Kind, "env=dev"), (entry.Kind, entry.MetadataText));
+                Assert.Equal(value.DisplayText, (await _svc.GetSecretValueAsync(name, entry.Name, entry.Kind)).DisplayText);
+            }
+            Assert.DoesNotMatch("plain-dev|hidden-dev|pw-dev|v-dev", await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            await _svc.UnregisterVaultAsync(name);
+            File.Delete(path);
+        }
+    }
+
     [Fact]
     public async Task Lists_registered_vault_with_parameters()
     {

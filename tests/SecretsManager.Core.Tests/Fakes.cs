@@ -120,7 +120,15 @@ public sealed class FakeSecretsService : ISecretsService
     public Task<StoreConfig> GetStoreConfigAsync() => Task.FromResult(StoreConfig);
     public Task SetStoreConfigAsync(StoreConfig config, string? password) { StoreConfig = config; Calls.Add($"SetStoreConfig {config} pw={password}"); return Task.CompletedTask; }
     public Task ChangeStorePasswordAsync(string currentPassword, string newPassword) { Calls.Add($"ChangePw {currentPassword}->{newPassword}"); return Task.CompletedTask; }
-    public Task UnlockStoreAsync(string password) { Calls.Add($"UnlockStore {password}"); return Task.CompletedTask; }
+    /// <summary>Like Unlock-SecretStore: unlocks every SecretStore vault, or throws for a wrong password.</summary>
+    public Task UnlockStoreAsync(string password)
+    {
+        Calls.Add($"UnlockStore {password}");
+        var stores = Vaults.Values.Where(v => v.Info.IsSecretStore && v.Password is not null).ToList();
+        if (stores.Any(v => v.Password != password)) throw new SecretsOperationException("Unable to unlock Microsoft.PowerShell.SecretStore vault. Password is invalid.");
+        foreach (var v in stores) v.Unlocked = true;
+        return Task.CompletedTask;
+    }
 
     /// <summary>Like the real one: locks every SecretStore vault that has a password.</summary>
     public Task<bool> LockStoreAsync()
@@ -129,6 +137,20 @@ public sealed class FakeSecretsService : ISecretsService
         foreach (var v in Vaults.Values.Where(v => v.Info.IsSecretStore)) v.Unlocked = false;
         return Task.FromResult(true);
     }
+}
+
+/// <summary>Stands in for Windows Hello: hands out the sealed password, or null when "cancelled".</summary>
+public sealed class FakeStorePasswordProvider : IStorePasswordProvider
+{
+    public bool Available { get; set; } = true;
+    public string? Sealed { get; set; }
+    public bool Cancel { get; set; }
+    public int Prompts { get; private set; }
+    public Task<bool> IsAvailableAsync() => Task.FromResult(Available);
+    public bool IsEnabled => Sealed is not null;
+    public Task<string?> GetPasswordAsync() { Prompts++; return Task.FromResult(Cancel ? null : Sealed); }
+    public Task EnableAsync(string password) { Prompts++; Sealed = password; return Task.CompletedTask; }
+    public Task DisableAsync() { Sealed = null; return Task.CompletedTask; }
 }
 
 public sealed class FakeClipboard : IClipboard

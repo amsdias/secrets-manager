@@ -63,6 +63,9 @@ if (-not $Source) {
             else { @('--self-contained', 'false', '-p:PublishSingleFile=true', '-p:DebugType=embedded') }
     dotnet publish (Join-Path $repo 'src\SecretsManager.App') -c Release -p:Platform=x64 -r win-x64 @mode -o $staging
     if ($LASTEXITCODE) { throw "dotnet publish failed (exit $LASTEXITCODE)" }
+    # The console front end for "get" (PowerShell doesn't capture a GUI exe's output).
+    dotnet publish (Join-Path $repo 'src\SecretsManager.Cli') -c Release -r win-x64 @mode -o $staging
+    if ($LASTEXITCODE) { throw "dotnet publish of the CLI failed (exit $LASTEXITCODE)" }
     $Source = $staging
 }
 try {

@@ -48,6 +48,16 @@ run the UI test with `-ExePath` on the installed exe. Verifying only the Debug b
   AppStore methods. Simple questions use `PromptDialog`, a ContentDialog keyed by prompt Id that reports its answer from `OnClosed`.
   Forms (editor, viewer, register vault, store settings) are in-window overlay panels, **not** ContentDialogs: only one ContentDialog can
   be open per XamlRoot, and a locked vault must be able to prompt on top of a form.
+- **`src/WindowsVault`**: the SecretsManager.WindowsVault extension vault (PowerShell, DPAPI via `ConvertFrom-SecureString`), for
+  keys read without approval. Embedded in the app and installed to `%LOCALAPPDATA%\SecretsManager\Modules` at startup
+  (`WindowsVaultModule`), because SecretManagement records the module path and a single-file build runs from a temp folder.
+- **Windows Hello** (`WindowsHelloPasswordProvider`, `StorePasswordSeal`): the SecretStore password sealed with AES-GCM under
+  SHA-256 of a Hello key's signature (KeyCredentialManager; RSA PKCS#1 signatures are deterministic) of a stored challenge.
+  `%LOCALAPPDATA%\SecretsManager\secretstore.hello`. AppStore tries it before the typed password. Can't be automated: the
+  Hello prompt needs the user.
+- **Command line**: `SecretsManager.exe get` runs `SecretsCli` (Core) with no window. `src/SecretsManager.Cli` is a console
+  relay, because **PowerShell neither waits for nor captures a GUI-subsystem exe** (`$x = & SecretsManager.exe get …` is empty).
+  `SECRETSMANAGER_APP` overrides the exe it relays to (the UI test uses it).
 - **`tests/TestVault`** is a minimal file-backed SecretManagement extension vault, shared by the C# tests and `legacy/`.
   `VaultParameters.Path` is a Clixml file; the optional `Password` simulates a locked vault, with unlock state kept in a `.unlocked`
   marker file.
@@ -100,6 +110,9 @@ run the UI test with `-ExePath` on the installed exe. Verifying only the Debug b
   theme from the window's root content, so `RequestedTheme` is set there too. The root paints `Theme.SolidBackground`.
 - **Settings** (`AppSettings`, JSON in `%LOCALAPPDATA%\SecretsManager\settings.json`): theme, auto-lock, clipboard seconds,
   minimize to tray, last vault. Changes apply at once and are saved. Window placement is saved by Reactor (`PersistPlacement`).
+- **PowerShell `switch` and `$x = if (…)`** unroll a `byte[]` (seen in the WindowsVault module): use if/elseif and plain
+  assignment. An extension vault's Get-Secret must return the `.PSObject.BaseObject`, and a plain `[hashtable]` (ConvertFrom-Json
+  -AsHashtable gives an ordered one).
 - **Screenshots:** capture **only the app window** (`PrintWindow` on its handle). Never capture the screen; it can expose the user's
   other windows.
 
