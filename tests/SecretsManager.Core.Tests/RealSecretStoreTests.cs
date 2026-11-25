@@ -10,11 +10,26 @@ namespace SecretsManager.Core.Tests;
 /// </summary>
 public class RealSecretStoreTests
 {
+    /// <summary>
+    /// One test, scenarios in a fixed order: SecretStore keeps process-wide static state (unlocked store, file watcher,
+    /// folder created once), so separate tests in one process influence each other. Each scenario deletes the store folder
+    /// at the end; after that, SecretStore's own password timeout stopped working, so the timeout check must come first.
+    /// </summary>
     [Fact(Explicit = true)]
-    public async Task Full_store_lifecycle_against_the_real_SecretStore()
+    public async Task Real_SecretStore_scenarios()
+    {
+        Assert.SkipWhen(Directory.Exists(SecretsService.DefaultSecretStoreFolder),
+            $"A SecretStore already exists at {SecretsService.DefaultSecretStoreFolder}; refusing to touch it.");
+        await Full_store_lifecycle();
+        await Store_created_without_a_password_exists_and_is_usable();
+    }
+
+    static async Task Full_store_lifecycle()
     {
         var folder = SecretsService.DefaultSecretStoreFolder;
-        Assert.SkipWhen(Directory.Exists(folder), $"A SecretStore already exists at {folder}; refusing to touch it.");
+        Assert.False(Directory.Exists(folder), $"A SecretStore exists at {folder}; refusing to touch it.");
+        // SecretStore creates this folder only once per process (static constructor); an earlier scenario deleted it.
+        Directory.CreateDirectory(folder);
 
         using var host = new PowerShellHost();
         var svc = new SecretsService(host);
@@ -47,7 +62,7 @@ public class RealSecretStoreTests
 
             // Prompt mode in a host without UI must fail as "locked", not hang.
             await svc.SetStoreConfigAsync(new StoreConfig(StoreAuthentication.Password, 1, StoreInteraction.Prompt), null);
-            await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+            await Task.Delay(TimeSpan.FromSeconds(3));
             using (var fresh = new PowerShellHost())
                 await Assert.ThrowsAsync<VaultLockedException>(() => new SecretsService(fresh).GetSecretsAsync(vault));
 
@@ -64,11 +79,12 @@ public class RealSecretStoreTests
     }
 
     // Reset-SecretStore without a password writes only storeconfig; the app must still end up with a usable store.
-    [Fact(Explicit = true)]
-    public async Task Store_created_without_a_password_exists_and_is_usable()
+    static async Task Store_created_without_a_password_exists_and_is_usable()
     {
         var folder = SecretsService.DefaultSecretStoreFolder;
-        Assert.SkipWhen(Directory.Exists(folder), $"A SecretStore already exists at {folder}; refusing to touch it.");
+        Assert.False(Directory.Exists(folder), $"A SecretStore exists at {folder}; refusing to touch it.");
+        // SecretStore creates this folder only once per process (static constructor); an earlier scenario deleted it.
+        Directory.CreateDirectory(folder);
 
         using var host = new PowerShellHost();
         var svc = new SecretsService(host);

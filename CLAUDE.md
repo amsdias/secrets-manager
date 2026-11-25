@@ -79,6 +79,10 @@ run the UI test with `-ExePath` on the installed exe. Verifying only the Debug b
   folder to `PSModulePath` all hid the missing-modules bug.
 - **Registering a SecretStore vault writes `localstore\storeconfig` without creating the store.** `AppState.IsStoreMissing`
   makes the app offer to create the store instead of asking to unlock one that doesn't exist.
+- **Real-store tests share SecretStore's process-wide static state**, so `RealSecretStoreTests` is a single test that runs its
+  scenarios in a fixed order. Deleting the store folder mid-process breaks SecretStore's own password timeout afterwards (the app
+  never deletes it). To run them on a machine that has a store: back up `localstore` and `secretvaultregistry`, remove
+  `localstore`, run, then restore and compare file hashes. Only do that with the user's consent.
 - **Locking SecretStore:** there is no Lock cmdlet. `LockStoreAsync` calls the internal static `LocalSecretStore.Reset()` through
   reflection on every loaded SecretStore assembly. The unlocked state is process-wide, not per runspace. The real-store tests cover this.
 - **Auto-lock** runs on `TimeProvider` (5-second checks). The UI reports activity with `NotifyActivity()` from the root's
