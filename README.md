@@ -19,6 +19,16 @@ A native Windows desktop app for
   Install-PSResource Microsoft.PowerShell.SecretManagement, Microsoft.PowerShell.SecretStore -Scope CurrentUser
   ```
 
+## Install
+
+```powershell
+pwsh -File tools/Install-SecretsManager.ps1             # build, install to %LOCALAPPDATA%\Programs\SecretsManager, Start menu shortcut
+pwsh -File tools/Install-SecretsManager.ps1 -Desktop    # also a desktop shortcut
+pwsh -File tools/Install-SecretsManager.ps1 -Uninstall  # remove the app and its shortcuts (vaults, secrets and settings stay)
+```
+
+Run it again to update (close the app first). No admin rights are needed.
+
 ## Build and run
 
 ```powershell
@@ -32,15 +42,21 @@ dotnet publish src/SecretsManager.App -c Release -p:Platform=x64 -r win-x64 --se
 ## Features
 
 - **Vaults**: list, register (any extension module, with vault parameters), unregister, set default, unlock.
-- **Secrets**: search (name and metadata), view (masked until revealed), copy, create, edit, rename, copy to another vault, delete.
+- **Secrets**: search (name and metadata; `key=value` matches one metadata key), view (masked until revealed), copy, create, edit,
+  rename, copy to another vault, delete. The three most used metadata keys get their own columns.
+- **Export / import**: save a whole vault to a password-encrypted `.smsecrets` file, and import it into any vault. On import you choose
+  whether secrets that already exist are skipped or overwritten.
+- **Lock**: **Lock** (Ctrl+L) closes open secrets, clears a copied value from the clipboard and locks SecretStore. The app also locks
+  itself after a chosen time without keyboard or mouse activity (status bar; default 10 minutes, saved in
+  `%LOCALAPPDATA%\SecretsManager\settings.json`).
 - **All secret types**: String, SecureString, PSCredential, Hashtable, ByteArray (load from / save to file), plus metadata.
 - **Password generator** (24 random characters, ambiguous characters left out).
 - **SecretStore settings**: authentication, password timeout, interaction, change password, reset (asks twice, and you must type `RESET`).
   The first run offers to create a SecretStore vault.
 - **Locked vaults**: any operation on a locked vault asks for the password in a dialog and retries. A wrong password asks again.
 
-Keyboard: **Ctrl+N** new secret, **F5** refresh. In the secret list: **Enter** view, **F2** edit, **Del** delete, **Ctrl+C** copy.
-**Esc** closes a side panel.
+Keyboard: **Ctrl+N** new secret, **F5** refresh, **Ctrl+F** search, **Ctrl+E** edit, **Ctrl+L** lock, **F1** list of shortcuts.
+In the secret list: **Enter** view, **F2** edit, **Del** delete, **Ctrl+C** copy. **Esc** closes a side panel.
 
 ## Security notes
 
@@ -50,14 +66,18 @@ Keyboard: **Ctrl+N** new secret, **F5** refresh. In the secret list: **Enter** v
   The hosted runspace uses ExecutionPolicy `Bypass` for itself only; it runs no scripts other than the app's built-in ones.
 - While you view or edit a secret, its value is held as a .NET string. Neither WinUI text controls nor modern .NET support `SecureString`
   end to end. Values become `SecureString` again when they are handed to the SecretManagement cmdlets.
-- **Metadata is not encrypted.** Keep secrets out of it.
+- **Metadata is not encrypted** in the vault. Keep secrets out of it. (In export files, everything is encrypted, names and metadata too.)
+- **Export files** use AES-256-GCM with a key derived from your password (PBKDF2-SHA256, 600,000 iterations). Anyone with the file and
+  the password can read every secret in it, so choose a strong password and store the file carefully.
+- **Locking SecretStore** uses SecretStore's internal reset of its unlocked state (it has no public lock command). If a future SecretStore
+  version changes that, the app says so, and the store still locks itself after its password timeout.
 - Prefer SecretStore `Interaction = None` (the app creates stores that way). With `Prompt`, SecretStore can't prompt inside the app, so
   the app asks for the password itself.
 
 ## Tests
 
 ```powershell
-dotnet test --project tests/SecretsManager.Core.Tests                     # 41 tests, ~2 s
+dotnet test --project tests/SecretsManager.Core.Tests                     # ~60 tests, a few seconds
 dotnet test --project tests/SecretsManager.Core.Tests -- --explicit only  # real SecretStore round trip (see below)
 pwsh -NoProfile -File tests/Invoke-AppUiTest.ps1                         # drives the built app with UI Automation (build first)
 ```

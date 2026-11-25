@@ -110,6 +110,8 @@ try {
     if ([string]$info.Type -ne 'SecureString' -or $info.Metadata['env'] -ne 'ui') { throw 'uitest1 was not saved correctly' }
     if ((Wait-For { Get-Value $plain uitest1 } 'uitest1 value').Length -ne 24) { throw 'generated password has the wrong length' }
     Pass 'new SecureString secret saved with generated password and metadata'
+    [void](Wait-For { (ByName 'env') -and (ByName 'ui') } 'metadata column "env" with value "ui"')
+    Pass 'metadata key shown as its own column'
 
     # --- taken name: editor stays open with the vault's error
     Invoke-El (ById 'NewSecretButton')
@@ -179,11 +181,17 @@ try {
     [void](Wait-For { ById 'ClipboardText' } 'clipboard countdown' 5)
     Pass 'copy started the clipboard auto-clear countdown'
 
+    # --- Lock now: drops the copied value and reports it
+    Invoke-El (ById 'LockButton')
+    [void](Wait-For { -not (ById 'ClipboardText') -and (ById 'StatusText').Current.Name -like 'Locked*' } 'lock to clear the clipboard countdown')
+    Pass 'Lock cleared the clipboard countdown'
+
     if ($ScreenshotDir) {
         Add-Type -AssemblyName System.Drawing
         Add-Type -Namespace SgUi -Name Native -MemberDefinition '[DllImport("user32.dll")] public static extern bool PrintWindow(System.IntPtr h, System.IntPtr dc, uint f);'
         $r = $main.Current.BoundingRectangle; $bmp = [Drawing.Bitmap]::new([int]$r.Width, [int]$r.Height); $g = [Drawing.Graphics]::FromImage($bmp)
         $dc = $g.GetHdc(); [void][SgUi.Native]::PrintWindow([IntPtr]$main.Current.NativeWindowHandle, $dc, 2); $g.ReleaseHdc($dc)
+        New-Item -ItemType Directory -Force -Path $ScreenshotDir | Out-Null
         $bmp.Save((Join-Path $ScreenshotDir 'app-final.png'))
     }
 

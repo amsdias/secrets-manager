@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 
 namespace SecretsManager.Core.App;
 
-public enum PromptKind { Password, NewPassword, ChangePassword, Confirm, Text, Choice }
+public enum PromptKind { Password, NewPassword, ChangePassword, Confirm, Text, Choice, Info }
 
 /// <summary>A modal question the UI must answer by calling <see cref="AppStore.CompletePrompt"/>.</summary>
 public sealed record PromptRequest(PromptKind Kind, string Title, string Message)
@@ -124,6 +124,8 @@ public sealed record AppState
     public string? Error { get; init; }
     public bool SecretStoreAvailable { get; init; }
     public int? ClipboardSecondsLeft { get; init; }
+    /// <summary>Lock after this many idle minutes; 0 = off.</summary>
+    public int AutoLockMinutes { get; init; }
 
     public EditorState? Editor { get; init; }
     public ViewerState? Viewer { get; init; }
@@ -140,22 +142,65 @@ public sealed record AppState
 
     public bool HasPanel => Editor is not null || Viewer is not null || VaultForm is not null || StoreSettings is not null;
 
-    public IReadOnlyList<SecretEntry> VisibleSecrets =>
-        string.IsNullOrWhiteSpace(Search)
-            ? Secrets
-            : Secrets.Where(s => s.Name.Contains(Search.Trim(), StringComparison.OrdinalIgnoreCase) ||
-                                 s.MetadataText.Contains(Search.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+    /// <summary>
+    /// Search text matches the name or the metadata text. "key=value" also matches secrets whose metadata key is
+    /// exactly "key" (any case) and whose value contains "value".
+    /// </summary>
+    public IReadOnlyList<SecretEntry> VisibleSecrets
+    {
+        get
+        {
+            var q = Search.Trim();
+            if (q.Length == 0) return Secrets;
+            var eq = q.IndexOf('=');
+            var (key, value) = eq > 0 ? (q[..eq].Trim(), q[(eq + 1)..].Trim()) : ("", "");
+            return Secrets.Where(s =>
+                s.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                s.MetadataText.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                (key.Length > 0 && s.Metadata.Any(kv => kv.Key.Equals(key, StringComparison.OrdinalIgnoreCase) &&
+                                                         kv.Value.Contains(value, StringComparison.OrdinalIgnoreCase)))).ToList();
+        }
+    }
+
+    public const int MaxMetadataColumns = 3;
+
+    /// <summary>The most used metadata keys in this vault (up to <see cref="MaxMetadataColumns"/>), shown as their own columns.</summary>
+    public IReadOnlyList<string> MetadataColumns =>
+        Secrets.SelectMany(s => s.Metadata.Keys)
+            .GroupBy(k => k, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(MaxMetadataColumns).Select(g => g.First()).ToList();
+
+    public static string MetadataValue(SecretEntry entry, string key) =>
+        entry.Metadata.FirstOrDefault(kv => kv.Key.Equals(key, StringComparison.OrdinalIgnoreCase)).Value ?? "";
+
+    /// <summary>The metadata not shown in a column of its own.</summary>
+    public static string OtherMetadataText(SecretEntry entry, IReadOnlyList<string> columns) =>
+        KeyValueText.Format(entry.Metadata.Where(kv => !columns.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))
+            .ToDictionary(kv => kv.Key, kv => kv.Value), "; ");
+
+    public const string ShortcutsText =
+        "Ctrl+N  —  New secret\n" +
+        "Enter  —  View the selected secret\n" +
+        "Ctrl+C  —  Copy its value (in the list)\n" +
+        "F2, Ctrl+E  —  Edit it\n" +
+        "Delete  —  Delete it\n" +
+        "Ctrl+F  —  Search (try key=value for metadata)\n" +
+        "F5  —  Refresh\n" +
+        "Ctrl+L  —  Lock now\n" +
+        "Esc  —  Close the open panel\n" +
+        "F1  —  This list";
 
     /// <summary>Message for the empty secrets area, or null when the list has rows.</summary>
     public string? EmptyMessage =>
         !HasLoaded ? "Loading…" :
         Vaults.IsEmpty ? (SecretStoreAvailable
-            ? "No vaults are registered yet. Click \"Register…\" to create a SecretStore vault."
+            ? "No vaults are registered yet. Click Register to create a SecretStore vault."
             : "No vaults are registered and Microsoft.PowerShell.SecretStore is not installed.") :
         SelectedVault is null ? "Select a vault." :
         IsStoreMissing ? "The SecretStore for this vault hasn't been created yet. Click Store settings to create it." :
-        IsVaultLocked ? "This vault is locked. Click \"Unlock…\" or press F5 to enter its password." :
-        Secrets.IsEmpty ? "This vault has no secrets yet. Click \"New secret\" (Ctrl+N) to add one." :
+        IsVaultLocked ? "This vault is locked. Click Unlock or press F5 to enter its password." :
+        Secrets.IsEmpty ? "This vault has no secrets yet. Click New secret (Ctrl+N) to add one." :
         VisibleSecrets.Count == 0 ? $"No secrets match '{Search.Trim()}'." :
         null;
 }

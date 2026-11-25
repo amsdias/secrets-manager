@@ -14,16 +14,19 @@ unpackaged, legacy kept side by side).
 ```powershell
 dotnet build src/SecretsManager.App -p:Platform=x64          # -p:Platform is REQUIRED (Windows App SDK needs an architecture)
 dotnet run --project src/SecretsManager.App -p:Platform=x64
-dotnet test --project tests/SecretsManager.Core.Tests        # MTP runner (global.json); ~2 s, 41 tests
+dotnet test --project tests/SecretsManager.Core.Tests        # MTP runner (global.json); a few seconds, ~60 tests
 dotnet test --project tests/SecretsManager.Core.Tests -- --filter-method "*Locked*"   # subset
 dotnet test --project tests/SecretsManager.Core.Tests -- --explicit only              # real SecretStore round trip
 pwsh -NoProfile -File tests/Invoke-AppUiTest.ps1 [-ExePath publish\SecretsManager.exe]  # UI Automation E2E (build first)
 dotnet publish src/SecretsManager.App -c Release -p:Platform=x64 -r win-x64 --self-contained -o publish
+pwsh -NoProfile -File tools/Install-SecretsManager.ps1       # publish + install to %LOCALAPPDATA%\Programs\SecretsManager + Start menu shortcut
+pwsh -NoProfile -File tools/New-AppIcon.ps1                  # redraw src/SecretsManager.App/Assets/app.ico
 ```
 
 Run the UI test after any change in `src/SecretsManager.App`. The unit tests do not exercise any rendering code.
-**The user runs `publish\SecretsManager.exe`**: after a UI change, republish it (the user must close the app first, because it locks the
-folder) and check that copy too. Verifying only the Debug build once led to reporting a fix the user couldn't see.
+**The user runs the installed copy** (`%LOCALAPPDATA%\Programs\SecretsManager`, Start menu "PowerShell Secrets"; earlier `publish\`).
+After a change, reinstall with `tools/Install-SecretsManager.ps1` (it refuses while that copy is running, so the user must close it) and
+run the UI test with `-ExePath` on the installed exe. Verifying only the Debug build once led to reporting a fix the user couldn't see.
 
 ## Architecture
 
@@ -76,6 +79,11 @@ folder) and check that copy too. Verifying only the Debug build once led to repo
   folder to `PSModulePath` all hid the missing-modules bug.
 - **Registering a SecretStore vault writes `localstore\storeconfig` without creating the store.** `AppState.IsStoreMissing`
   makes the app offer to create the store instead of asking to unlock one that doesn't exist.
+- **Locking SecretStore:** there is no Lock cmdlet. `LockStoreAsync` calls the internal static `LocalSecretStore.Reset()` through
+  reflection on every loaded SecretStore assembly. The unlocked state is process-wide, not per runspace. The real-store tests cover this.
+- **Auto-lock** runs on `TimeProvider` (5-second checks). The UI reports activity with `NotifyActivity()` from the root's
+  `OnPreviewKeyDown`/`OnPointerMoved`. Locking closes the viewer and editor, so unsaved edits are dropped after the idle time.
+- **Reactor hooks** like `UseElementFocus` are extension methods in `Microsoft.UI.Reactor.Hooks`: call them as `this.UseElementFocus()`.
 - **`Reset-SecretStore` without a password (Interaction None) writes only `storeconfig`.** The `storefile` appears on first access,
   so `ResetStoreAsync` calls `Get-SecretStoreConfiguration` afterwards. Without that, `IsSecretStoreInitialized` stayed false and
   the app kept offering to create the store.

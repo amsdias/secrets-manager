@@ -121,6 +121,14 @@ public sealed class FakeSecretsService : ISecretsService
     public Task SetStoreConfigAsync(StoreConfig config, string? password) { StoreConfig = config; Calls.Add($"SetStoreConfig {config} pw={password}"); return Task.CompletedTask; }
     public Task ChangeStorePasswordAsync(string currentPassword, string newPassword) { Calls.Add($"ChangePw {currentPassword}->{newPassword}"); return Task.CompletedTask; }
     public Task UnlockStoreAsync(string password) { Calls.Add($"UnlockStore {password}"); return Task.CompletedTask; }
+
+    /// <summary>Like the real one: locks every SecretStore vault that has a password.</summary>
+    public Task<bool> LockStoreAsync()
+    {
+        Calls.Add("LockStore");
+        foreach (var v in Vaults.Values.Where(v => v.Info.IsSecretStore)) v.Unlocked = false;
+        return Task.FromResult(true);
+    }
 }
 
 public sealed class FakeClipboard : IClipboard

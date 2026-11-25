@@ -39,6 +39,12 @@ public class RealSecretStoreTests
             await Assert.ThrowsAnyAsync<SecretsOperationException>(() => svc.UnlockStoreAsync("Init#12345"));
             await svc.UnlockStoreAsync("New#12345");
 
+            // The app's Lock: SecretStore has no lock cmdlet, so this resets its internal unlocked state.
+            Assert.True(await svc.LockStoreAsync());
+            await Assert.ThrowsAsync<VaultLockedException>(() => svc.GetSecretsAsync(vault));
+            await svc.UnlockStoreAsync("New#12345");
+            Assert.Single(await svc.GetSecretsAsync(vault));
+
             // Prompt mode in a host without UI must fail as "locked", not hang.
             await svc.SetStoreConfigAsync(new StoreConfig(StoreAuthentication.Password, 1, StoreInteraction.Prompt), null);
             await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
@@ -48,6 +54,39 @@ public class RealSecretStoreTests
             await svc.UnlockStoreAsync("New#12345");
             await svc.SetStoreConfigAsync(new StoreConfig(StoreAuthentication.None, 900, StoreInteraction.None), "New#12345");
             Assert.Equal(StoreAuthentication.None, (await svc.GetStoreConfigAsync()).Authentication);
+        }
+        finally
+        {
+            try { await svc.UnregisterVaultAsync(vault); } catch { }
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+        Assert.False(Directory.Exists(folder));
+    }
+
+    // Reset-SecretStore without a password writes only storeconfig; the app must still end up with a usable store.
+    [Fact(Explicit = true)]
+    public async Task Store_created_without_a_password_exists_and_is_usable()
+    {
+        var folder = SecretsService.DefaultSecretStoreFolder;
+        Assert.SkipWhen(Directory.Exists(folder), $"A SecretStore already exists at {folder}; refusing to touch it.");
+
+        using var host = new PowerShellHost();
+        var svc = new SecretsService(host);
+        const string vault = "SgRealStoreNoPw";
+        try
+        {
+            // Registering first is the app's order, and it leaves a storeconfig without a store file.
+            await svc.RegisterVaultAsync(vault, VaultInfo.SecretStoreModule, null, null, makeDefault: false);
+            Assert.False(svc.IsSecretStoreInitialized);
+
+            await svc.InitializeStoreAsync(null, 900);
+            Assert.True(svc.IsSecretStoreInitialized);
+            Assert.Equal(StoreAuthentication.None, (await svc.GetStoreConfigAsync()).Authentication);
+
+            await svc.SetSecretAsync(vault, "s", new TextSecret("hello"), null, true);
+            Assert.Equal("s", Assert.Single(await svc.GetSecretsAsync(vault)).Name);
+            using (var fresh = new PowerShellHost()) // a new process needs no unlock either
+                Assert.Single(await new SecretsService(fresh).GetSecretsAsync(vault));
         }
         finally
         {

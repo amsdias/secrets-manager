@@ -54,14 +54,14 @@ sealed class PromptDialog : Component<PromptRequest>
 
         return ContentDialog(p.Title,
             VStack(12,
-                TextBlock(p.Message).TextWrapping(),
+                TextBlock(p.Message).TextWrapping().IsTextSelectionEnabled(p.Kind == PromptKind.Info),
                 body,
                 mismatch ? TextBlock("The passwords do not match.").Foreground(Theme.SystemCritical) : null
             ).MinWidth(360),
             p.PrimaryText) with
         {
             IsOpen = true,
-            CloseButtonText = p.Kind == PromptKind.Confirm && !p.IsDanger ? "Not now" : "Cancel",
+            CloseButtonText = p.Kind switch { PromptKind.Info => null, PromptKind.Confirm when !p.IsDanger => "Not now", _ => "Cancel" },
             DefaultButton = p.IsDanger ? ContentDialogButton.Close : ContentDialogButton.Primary,
             IsPrimaryButtonEnabled = valid,
             OnClosed = result => AppServices.Store.CompletePrompt(result != ContentDialogResult.Primary ? null : new PromptResult(

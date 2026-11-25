@@ -28,4 +28,6 @@ public interface ISecretsService
     Task SetStoreConfigAsync(StoreConfig config, string? password);
     Task ChangeStorePasswordAsync(string currentPassword, string newPassword);
     Task UnlockStoreAsync(string password);
+    /// <summary>Forgets SecretStore's unlocked state in this process. False if this SecretStore version can't be locked.</summary>
+    Task<bool> LockStoreAsync();
 }

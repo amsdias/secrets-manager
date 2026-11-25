@@ -1,5 +1,6 @@
 using Microsoft.UI.Reactor;
 using Microsoft.UI.Reactor.Core;
+using Microsoft.UI.Reactor.Hooks;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.Windows.Storage.Pickers;
@@ -26,6 +27,7 @@ sealed class SecretsApp : Component
         var s = UseExternalStore(Store.Subscribe, () => Store.State, SameInstance);
         var window = UseWindow();
         var closeReady = UseRef(false);
+        var (searchRef, focusSearch) = this.UseElementFocus(FocusState.Keyboard);
 
         UseEffect(() => { _ = Store.InitializeAsync(); }, []);
 
@@ -60,7 +62,7 @@ sealed class SecretsApp : Component
             columns: [GridSize.Px(290), GridSize.Star()],
             rows: [GridSize.Star()],
             Card(VaultPane(s)).Grid(row: 0, column: 0),
-            Card(SecretsPane(s, newCommand, refreshCommand)).Margin(12, 0, 0, 0).Grid(row: 0, column: 1));
+            Card(SecretsPane(s, newCommand, refreshCommand, e => e.Ref(searchRef))).Margin(12, 0, 0, 0).Grid(row: 0, column: 1));
 
         Element? overlay = s.HasPanel
             ? Border(
@@ -81,7 +83,8 @@ sealed class SecretsApp : Component
             ).Grid(row: 1),
             StatusBar(s).Grid(row: 2),
             s.Prompt is null ? null : Component<PromptDialog, PromptRequest>(s.Prompt).WithKey($"prompt-{s.Prompt.Id}")
-        );
+        ).OnPreviewKeyDown((_, e) => OnGlobalKey(e, focusSearch))
+         .OnPointerMoved((_, _) => Store.NotifyActivity());
     }
 
     // ------------------------------------------------------------------ vaults
@@ -127,20 +130,24 @@ sealed class SecretsApp : Component
             Border(Empty()).Height(1).Background(Theme.DividerStroke).Margin(0, 8, 0, 12),
             Grid(
                 columns: [GridSize.Star(), GridSize.Star()],
-                rows: [GridSize.Auto, GridSize.Auto, GridSize.Auto, GridSize.Auto, GridSize.Auto],
+                rows: [GridSize.Auto, GridSize.Auto, GridSize.Auto, GridSize.Auto, GridSize.Auto, GridSize.Auto],
                 SectionLabel("Vault", 0),
                 Cell(Button("Register…", Store.OpenVaultForm).AutomationId("RegisterVaultButton"), 1, 0),
                 Cell(Button("Unregister", () => _ = Store.UnregisterSelectedVaultAsync()).IsEnabled(vault is not null).AutomationId("UnregisterVaultButton"), 1, 1),
                 Cell(Button("Set default", () => _ = Store.SetDefaultVaultAsync()).IsEnabled(vault is { IsDefault: false }).AutomationId("DefaultVaultButton"), 2, 0),
                 Cell(Button("Unlock…", () => _ = Store.UnlockSelectedVaultAsync()).IsEnabled(s.CanUnlock).AutomationId("UnlockButton"), 2, 1),
-                SectionLabel("SecretStore", 3).Margin(0, 8, 0, 6),
-                Cell(Button("Store settings…", () => _ = Store.OpenStoreSettingsAsync()).IsEnabled(s.SecretStoreAvailable).AutomationId("StoreSettingsButton"), 4, 0, columnSpan: 2)
+                Cell(Button("Import…", () => _ = ImportAsync()).IsEnabled(vault is not null && !s.IsStoreMissing)
+                    .ToolTip("Import secrets from an encrypted export file into this vault").AutomationId("ImportButton"), 3, 0),
+                Cell(Button("Export…", () => _ = ExportAsync()).IsEnabled(vault is not null && !s.IsStoreMissing && !s.Secrets.IsEmpty)
+                    .ToolTip("Save every secret of this vault to a password-encrypted file").AutomationId("ExportButton"), 3, 1),
+                SectionLabel("SecretStore", 4).Margin(0, 8, 0, 6),
+                Cell(Button("Store settings…", () => _ = Store.OpenStoreSettingsAsync()).IsEnabled(s.SecretStoreAvailable).AutomationId("StoreSettingsButton"), 5, 0, columnSpan: 2)
             ));
     }
 
     // ------------------------------------------------------------------ secrets
 
-    Element SecretsPane(AppState s, Command newCommand, Command refreshCommand)
+    Element SecretsPane(AppState s, Command newCommand, Command refreshCommand, Func<Element, Element> attachSearchRef)
     {
         var vault = s.CurrentVault;
         var hasSecret = s.CurrentSecret is not null;
@@ -153,37 +160,43 @@ sealed class SecretsApp : Component
             VStack(0,
                 Subtitle(vault?.Name ?? "No vault selected").AutomationId("VaultTitle"),
                 Caption(vault is null ? "" : vault.Description is { } d ? $"{vault.ModuleName} - {d}" : vault.ModuleName).Opacity(0.7)),
-            TextBox(s.Search, Store.SetSearch, placeholderText: "Search name or metadata")
-                .AutomationName("Search secrets").AutomationId("SearchBox").VAlign(VerticalAlignment.Center).Grid(row: 0, column: 1));
+            attachSearchRef(TextBox(s.Search, Store.SetSearch, placeholderText: "Search name or metadata (key=value)"))
+                .ToolTip("Search (Ctrl+F)").AutomationName("Search secrets").AutomationId("SearchBox").VAlign(VerticalAlignment.Center).Grid(row: 0, column: 1));
 
         var toolbar = HStack(8,
             Button(newCommand).AccentButton().IsEnabled(vault is not null && !s.IsStoreMissing).AutomationId("NewSecretButton"),
-            Button("View", () => _ = Store.ViewSecretAsync()).IsEnabled(hasSecret).AutomationId("ViewSecretButton"),
-            Button("Copy", () => _ = Store.CopySelectedSecretAsync()).IsEnabled(hasSecret).ToolTip("Copy the value (the password, for credentials)").AutomationId("CopySecretButton"),
-            Button("Edit", () => _ = Store.OpenEditSecretAsync()).IsEnabled(hasSecret).AutomationId("EditSecretButton"),
+            Button("View", () => _ = Store.ViewSecretAsync()).IsEnabled(hasSecret).ToolTip("View (Enter)").AutomationId("ViewSecretButton"),
+            Button("Copy", () => _ = Store.CopySelectedSecretAsync()).IsEnabled(hasSecret).ToolTip("Copy the value, or the password of a credential (Ctrl+C)").AutomationId("CopySecretButton"),
+            Button("Edit", () => _ = Store.OpenEditSecretAsync()).IsEnabled(hasSecret).ToolTip("Edit (F2 or Ctrl+E)").AutomationId("EditSecretButton"),
             Button("Rename", () => _ = Store.RenameSelectedSecretAsync()).IsEnabled(hasSecret).AutomationId("RenameSecretButton"),
             Button("Copy to vault…", () => _ = Store.CopySelectedSecretToVaultAsync()).IsEnabled(hasSecret && s.Vaults.Length > 1).AutomationId("CopyToVaultButton"),
-            Button("Delete", () => _ = Store.DeleteSelectedSecretAsync()).IsEnabled(hasSecret).Foreground(Theme.SystemCritical).AutomationId("DeleteSecretButton"),
+            Button("Delete", () => _ = Store.DeleteSelectedSecretAsync()).IsEnabled(hasSecret).Foreground(Theme.SystemCritical).ToolTip("Delete (Del)").AutomationId("DeleteSecretButton"),
             Button(refreshCommand).AutomationId("RefreshButton")
         ).Margin(0, 12, 0, 12);
 
-        var columnHeader = Grid(
-            columns: [GridSize.Star(2), GridSize.Px(120), GridSize.Star(3)],
-            rows: [GridSize.Auto],
+        // Name, Type, one column per frequent metadata key, then the rest of the metadata.
+        var metaColumns = s.MetadataColumns;
+        GridSize[] columns = [GridSize.Star(2), GridSize.Px(120), .. metaColumns.Select(_ => GridSize.Star(1)), GridSize.Star(2)];
+        var restColumn = 2 + metaColumns.Count;
+        Element Row(Element name, Element type, IEnumerable<Element> meta, Element rest) =>
+            Grid(columns: columns, rows: [GridSize.Auto],
+                [name, type.Grid(row: 0, column: 1), .. meta.Select((m, i) => m.Grid(row: 0, column: 2 + i)), rest.Grid(row: 0, column: restColumn)]);
+
+        var columnHeader = Row(
             Caption("Name").SemiBold(),
-            Caption("Type").SemiBold().Grid(row: 0, column: 1),
-            Caption("Metadata").SemiBold().Grid(row: 0, column: 2)
+            Caption("Type").SemiBold(),
+            metaColumns.Select(k => (Element)Caption(k).SemiBold()),
+            Caption(metaColumns.Count > 0 ? "Other metadata" : "Metadata").SemiBold()
         ).Padding(12, 0, 12, 6);
 
         Element list = s.EmptyMessage is { } empty
             ? TextBlock(empty).TextWrapping().TextAlignment(TextAlignment.Center).Opacity(0.7).HAlign(HorizontalAlignment.Center).VAlign(VerticalAlignment.Center).MaxWidth(420).AutomationId("EmptyText")
             : ListView<SecretEntry>(visible, x => x.Name, (x, index) =>
-                    Grid(
-                        columns: [GridSize.Star(2), GridSize.Px(120), GridSize.Star(3)],
-                        rows: [GridSize.Auto],
+                    Row(
                         TextBlock(x.Name).AutomationName(x.Name),
-                        TextBlock(x.Kind.ToString()).Opacity(0.8).Grid(row: 0, column: 1),
-                        TextBlock(x.MetadataText).Opacity(0.8).Grid(row: 0, column: 2)
+                        TextBlock(x.Kind.ToString()).Opacity(0.8),
+                        metaColumns.Select(k => (Element)TextBlock(AppState.MetadataValue(x, k)).Opacity(0.8).Margin(0, 0, 8, 0)),
+                        TextBlock(AppState.OtherMetadataText(x, metaColumns)).Opacity(0.8)
                     ).Padding(0, 6, 0, 6).OnDoubleTapped((_, _) => Fire(Store.ViewSecretAsync())))
                 .SelectionChanged(sel => Store.SelectSecret(sel.FirstOrDefault()?.Name))
                 .Set(lv => { if (lv.SelectedIndex != selectedIndex) lv.SelectedIndex = selectedIndex; })
@@ -204,8 +217,7 @@ sealed class SecretsApp : Component
 
     void OnListKey(Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
     {
-        var ctrl = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control)
-            .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+        var ctrl = IsCtrlDown();
         switch (e.Key)
         {
             case VirtualKey.Enter: _ = Store.ViewSecretAsync(); break;
@@ -217,17 +229,70 @@ sealed class SecretsApp : Component
         e.Handled = true;
     }
 
-    Element StatusBar(AppState s) =>
-        Border(
+    Element StatusBar(AppState s)
+    {
+        int[] choices = AppStore.AutoLockChoices.Contains(s.AutoLockMinutes)
+            ? [.. AppStore.AutoLockChoices]
+            : [.. AppStore.AutoLockChoices, s.AutoLockMinutes];
+        var labels = choices.Select(m => m == 0 ? "Off" : $"{m} min").ToArray();
+        return Border(
             Grid(
-                columns: [GridSize.Star(), GridSize.Auto, GridSize.Auto],
+                columns: [GridSize.Star(), GridSize.Auto, GridSize.Auto, GridSize.Auto, GridSize.Auto],
                 rows: [GridSize.Auto],
-                TextBlock(s.Status).AutomationId("StatusText"),
+                TextBlock(s.Status).TextTrimming(TextTrimming.CharacterEllipsis).VAlign(VerticalAlignment.Center).AutomationId("StatusText"),
                 s.ClipboardSecondsLeft is { } left
-                    ? TextBlock($"Clipboard clears in {left}s").Foreground(Theme.AccentText).Margin(12, 0, 12, 0).AutomationId("ClipboardText").Grid(row: 0, column: 1)
+                    ? TextBlock($"Clipboard clears in {left}s").Foreground(Theme.AccentText).Margin(12, 0, 12, 0).VAlign(VerticalAlignment.Center).AutomationId("ClipboardText").Grid(row: 0, column: 1)
                     : null,
-                s.IsBusy ? ProgressRing().Width(16).Height(16).Grid(row: 0, column: 2) : null)
-        ).Background(Theme.LayerFill).Padding(14, 6, 14, 6);
+                s.IsBusy ? ProgressRing().Width(16).Height(16).Margin(0, 0, 12, 0).Grid(row: 0, column: 2) : null,
+                HStack(6,
+                    Caption("Auto-lock").Opacity(0.8).VAlign(VerticalAlignment.Center),
+                    ComboBox(labels, Array.IndexOf(choices, s.AutoLockMinutes), i =>
+                        {
+                            if (i >= 0 && choices[i] != Store.State.AutoLockMinutes) _ = Store.SetAutoLockMinutesAsync(choices[i]);
+                        })
+                        .ToolTip("Lock after this long without keyboard or mouse activity").AutomationName("Auto-lock").AutomationId("AutoLockCombo").MinWidth(100)
+                ).Margin(0, 0, 8, 0).Grid(row: 0, column: 3),
+                Button("Lock", () => _ = Store.LockAsync())
+                    .ToolTip("Lock now: close open secrets, clear the clipboard and lock SecretStore (Ctrl+L)").AutomationId("LockButton").Grid(row: 0, column: 4))
+        ).Background(Theme.LayerFill).Padding(14, 4, 14, 4);
+    }
+
+    /// <summary>Window-wide shortcuts (Ctrl+N and F5 are accelerators on their buttons). Every key press also counts as activity.</summary>
+    void OnGlobalKey(Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e, Action focusSearch)
+    {
+        Store.NotifyActivity();
+        var s = Store.State;
+        if (s.Prompt is not null) return;
+        var ctrl = IsCtrlDown();
+        switch (e.Key)
+        {
+            case VirtualKey.F when ctrl && !s.HasPanel: focusSearch(); break;
+            case VirtualKey.L when ctrl: _ = Store.LockAsync(); break;
+            case VirtualKey.E when ctrl && !s.HasPanel && s.CurrentSecret is not null: _ = Store.OpenEditSecretAsync(); break;
+            case VirtualKey.F1: _ = Store.ShowShortcutsAsync(); break;
+            default: return;
+        }
+        e.Handled = true;
+    }
+
+    static bool IsCtrlDown() =>
+        Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+
+    async Task ExportAsync()
+    {
+        if (Store.State.CurrentVault is not { } vault) return;
+        var target = await PickSaveFileAsync(new SaveFilePickerOptions(
+            new[] { new FileTypeChoice("Secrets Manager export", new[] { SecretsExport.FileExtension }) }, $"{vault.Name}-{DateTime.Now:yyyy-MM-dd}"));
+        if (target is null) return;
+        await Store.ExportSelectedVaultAsync(target.Path);
+    }
+
+    async Task ImportAsync()
+    {
+        var file = await PickFileAsync(new FilePickerOptions(FileTypeFilter: new[] { SecretsExport.FileExtension }) { Title = "Import secrets" });
+        if (file is null) return;
+        await Store.ImportIntoSelectedVaultAsync(file.Path);
+    }
 
     // ------------------------------------------------------------------ panels (overlay)
 

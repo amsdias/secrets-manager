@@ -7,20 +7,23 @@ namespace SecretsManager.Core.App;
 /// The UI renders <see cref="State"/>, calls these methods, and answers <see cref="AppState.Prompt"/>
 /// via <see cref="CompletePrompt"/>. Methods return Tasks so tests can await whole flows.
 /// </summary>
-public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, TimeProvider? time = null)
+public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, TimeProvider? time = null, IAppSettingsStore? settings = null)
 {
     const int DefaultPasswordTimeout = 900;
     const int MaxFileBytes = 1024 * 1024;
 
     readonly TimeProvider _time = time ?? TimeProvider.System;
     readonly Lock _lock = new();
-    AppState _state = new();
+    readonly IAppSettingsStore _settings = settings ?? new InMemorySettingsStore();
+    AppState _state = new() { AutoLockMinutes = (settings?.Load() ?? new AppSettings()).AutoLockMinutes };
     TaskCompletionSource<PromptResult?>? _pendingPrompt;
     int _promptId, _loadVersion;
     CancellationTokenSource? _clipboardCts;
     string? _clipboardValue;
 
     public int ClipboardClearSeconds { get; init; } = 30;
+    /// <summary>PBKDF2 work factor for new export files (tests lower it).</summary>
+    public int ExportIterations { get; init; } = SecretsExport.DefaultIterations;
     public AppState State => _state;
     public event Action? Changed;
 
@@ -96,6 +99,7 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
 
     public Task InitializeAsync() => Run(async () =>
     {
+        if (Interlocked.Exchange(ref _autoLockLoopStarted, 1) == 0) _ = AutoLockLoopAsync();
         var available = await secrets.IsSecretStoreModuleAvailableAsync();
         Update(s => s with { SecretStoreAvailable = available });
         await ReloadVaultsAsync(null);
@@ -379,6 +383,142 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
         await WithVault(target, () => secrets.CopySecretAsync(entry.VaultName, entry.Name, target));
         SetStatus($"Copied '{entry.Name}' to '{target}'.");
     });
+
+    // ------------------------------------------------------------------ export / import
+
+    /// <summary>Writes every secret of the selected vault to a password-encrypted file (see <see cref="SecretsExport"/>).</summary>
+    public Task ExportSelectedVaultAsync(string path) => Run(async () =>
+    {
+        if (State.CurrentVault is not { } vault) return;
+        var entries = await WithVault(vault.Name, () => secrets.GetSecretsAsync(vault.Name));
+        var exportable = entries.Where(e => e.Kind != SecretKind.Unknown).ToList();
+        if (exportable.Count == 0) { SetStatus($"'{vault.Name}' has no secrets to export."); return; }
+        var r = await AskAsync(new PromptRequest(PromptKind.NewPassword, "Export secrets",
+            $"Choose a password for the export file. Anyone with the file and this password can read all {exportable.Count} secret(s) in '{vault.Name}'.")
+            { PrimaryText = "Export" });
+        if (r?.Password is not { Length: > 0 } password) { SetStatus("Export cancelled."); return; }
+
+        var items = new List<ExportedSecret>();
+        foreach (var e in exportable)
+            items.Add(new(e.Name, await WithVault(vault.Name, () => secrets.GetSecretValueAsync(vault.Name, e.Name, e.Kind)), e.Metadata));
+        var bytes = await Task.Run(() => SecretsExport.Encrypt(items, password, ExportIterations));
+        await File.WriteAllBytesAsync(path, bytes);
+        var skipped = entries.Count - exportable.Count;
+        SetStatus($"Exported {items.Count} secret(s) from '{vault.Name}' to {Path.GetFileName(path)}." +
+                  (skipped > 0 ? $" Skipped {skipped} of an unsupported type." : ""));
+    });
+
+    /// <summary>Imports an export file into the selected vault. Asks whether to skip or overwrite secrets that already exist.</summary>
+    public Task ImportIntoSelectedVaultAsync(string path) => Run(async () =>
+    {
+        if (State.CurrentVault is not { } vault) return;
+        var file = await File.ReadAllBytesAsync(path);
+        IReadOnlyList<ExportedSecret>? items = null;
+        for (var attempt = 1; items is null; attempt++)
+        {
+            var r = await AskAsync(new PromptRequest(PromptKind.Password, "Import secrets", attempt == 1
+                ? $"Enter the password of {Path.GetFileName(path)}."
+                : "That password didn't open the file (or the file has been changed). Try again.") { PrimaryText = "Open" });
+            if (r?.Password is not { Length: > 0 } password) { SetStatus("Import cancelled."); return; }
+            try { items = await Task.Run(() => SecretsExport.Decrypt(file, password)); }
+            catch (ExportPasswordException) { /* ask again */ }
+        }
+        if (items.Count == 0) { SetStatus("The export file has no secrets."); return; }
+
+        var existing = (await WithVault(vault.Name, () => secrets.GetSecretsAsync(vault.Name)))
+            .Select(e => e.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var conflicts = items.Count(i => existing.Contains(i.Name));
+        var overwrite = false;
+        if (conflicts > 0)
+        {
+            var r = await AskAsync(new PromptRequest(PromptKind.Choice, "Import secrets",
+                $"{conflicts} of the {items.Count} secret(s) already exist in '{vault.Name}'.")
+            {
+                Choices = ["Skip them (keep the existing secrets)", "Overwrite them with the imported versions"],
+                PrimaryText = "Import",
+            });
+            if (r is null || r.ChoiceIndex < 0) { SetStatus("Import cancelled."); return; }
+            overwrite = r.ChoiceIndex == 1;
+        }
+
+        int imported = 0, skipped = 0;
+        var failed = new List<string>();
+        foreach (var item in items)
+        {
+            if (!overwrite && existing.Contains(item.Name)) { skipped++; continue; }
+            try
+            {
+                await WithVault(vault.Name, () => secrets.SetSecretAsync(vault.Name, item.Name, item.Value,
+                    item.Metadata.Count > 0 ? item.Metadata : null, noClobber: false));
+                imported++;
+            }
+            catch (SecretsOperationException ex) { failed.Add($"{item.Name}: {ex.Message}"); }
+        }
+        await LoadSecretsAsync();
+        if (failed.Count > 0)
+            Update(s => s with { Error = $"{failed.Count} secret(s) could not be imported:\n" + string.Join("\n", failed) });
+        SetStatus($"Imported {imported} secret(s) into '{vault.Name}'." +
+                  (skipped > 0 ? $" Skipped {skipped} that already existed." : "") +
+                  (failed.Count > 0 ? $" {failed.Count} failed." : ""));
+    });
+
+    // ------------------------------------------------------------------ locking
+
+    long _lastActivityTicks = (time ?? TimeProvider.System).GetUtcNow().UtcTicks;
+    int _autoLockLoopStarted;
+    volatile bool _lockedSinceActivity;
+
+    public static IReadOnlyList<int> AutoLockChoices { get; } = [0, 1, 5, 15, 30, 60];
+
+    /// <summary>The UI calls this on keyboard and pointer input; it postpones auto-lock. Cheap: no state change.</summary>
+    public void NotifyActivity()
+    {
+        Volatile.Write(ref _lastActivityTicks, _time.GetUtcNow().UtcTicks);
+        _lockedSinceActivity = false;
+    }
+
+    public Task SetAutoLockMinutesAsync(int minutes) => Run(() =>
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(minutes);
+        Update(s => s with { AutoLockMinutes = minutes });
+        NotifyActivity();
+        _settings.Save(_settings.Load() with { AutoLockMinutes = minutes });
+        SetStatus(minutes == 0 ? "Auto-lock is off." : $"The app locks after {minutes} minute(s) without activity.");
+        return Task.CompletedTask;
+    });
+
+    public Task LockAsync() => LockAsync("Locked.");
+
+    /// <summary>
+    /// Drops every decrypted value the app holds (viewer, editor, clipboard) and locks SecretStore, so the next access
+    /// needs its password. Other vault types can't be locked from outside; their open values are still dropped.
+    /// </summary>
+    Task LockAsync(string status) => Run(async () =>
+    {
+        Update(s => s with { Viewer = null, Editor = null });
+        await ClearClipboardIfOursAsync();
+        var locked = await secrets.LockStoreAsync();
+        if (State.CurrentVault is { IsSecretStore: true } && !State.IsStoreMissing && State.StoreAuthentication != StoreAuthentication.None)
+            Update(s => s with { Secrets = [], SelectedSecret = null, IsVaultLocked = true });
+        SetStatus(locked ? status : status + " This SecretStore version can't be locked by the app; it locks itself after its password timeout.");
+    });
+
+    async Task AutoLockLoopAsync()
+    {
+        while (true)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), _time);
+            var minutes = State.AutoLockMinutes;
+            if (minutes <= 0 || _lockedSinceActivity) continue;
+            var idle = _time.GetUtcNow() - new DateTimeOffset(Volatile.Read(ref _lastActivityTicks), TimeSpan.Zero);
+            if (idle < TimeSpan.FromMinutes(minutes)) continue;
+            _lockedSinceActivity = true;
+            await LockAsync($"Locked after {minutes} minute(s) without activity.");
+        }
+    }
+
+    public Task ShowShortcutsAsync() =>
+        AskAsync(new PromptRequest(PromptKind.Info, "Keyboard shortcuts", AppState.ShortcutsText) { PrimaryText = "Close" });
 
     // ------------------------------------------------------------------ clipboard
 

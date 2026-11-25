@@ -193,6 +193,25 @@ public sealed class SecretsService(PowerShellHost host, string? secretStoreFolde
             Args(("Password", ToSecure(currentPassword)), ("NewPassword", ToSecure(newPassword))));
     }
 
+    /// <summary>
+    /// SecretStore has no Lock cmdlet. Its unlocked state is the static LocalSecretStore instance (process-wide, shared by
+    /// every runspace), and its internal Reset() disposes it, which is what Reset-SecretStore uses too.
+    /// </summary>
+    public async Task<bool> LockStoreAsync()
+    {
+        var r = await Run("""
+            $asms = @([AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { $_.GetName().Name -eq 'Microsoft.PowerShell.SecretStore' })
+            $ok = $true
+            foreach ($a in $asms) {
+                $t = $a.GetType('Microsoft.PowerShell.SecretStore.LocalSecretStore')
+                $m = if ($t) { $t.GetMethod('Reset', [Reflection.BindingFlags]'NonPublic,Static') }
+                if ($m) { $null = $m.Invoke($null, $null) } else { $ok = $false }
+            }
+            $ok
+            """);
+        return r.Count > 0 && r[^1].BaseObject is true;
+    }
+
     public Task UnlockStoreAsync(string password) =>
         RunStore("param($Password) Unlock-SecretStore -Password $Password", Args(("Password", ToSecure(password))));
 
