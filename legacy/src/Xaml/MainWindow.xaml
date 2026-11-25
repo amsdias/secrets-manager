@@ -1,0 +1,108 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="PowerShell Secrets" Width="1060" Height="660" MinWidth="800" MinHeight="440"
+        WindowStartupLocation="CenterScreen" FontFamily="Segoe UI" FontSize="13" Background="#F3F4F6">
+  <DockPanel>
+    <Border DockPanel.Dock="Bottom" Background="#E5E7EB" Padding="12,5">
+      <DockPanel>
+        <TextBlock x:Name="ClipboardText" DockPanel.Dock="Right" Foreground="#1D4ED8" Margin="12,0,0,0"/>
+        <TextBlock x:Name="StatusText" Text="Ready" TextTrimming="CharacterEllipsis" Foreground="#374151"/>
+      </DockPanel>
+    </Border>
+
+    <Grid Margin="12">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="280" MinWidth="210"/>
+        <ColumnDefinition Width="12"/>
+        <ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+
+      <!-- Vaults -->
+      <Border Style="{StaticResource Card}">
+        <DockPanel>
+          <TextBlock DockPanel.Dock="Top" Text="Vaults" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8"/>
+          <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+            <WrapPanel>
+              <Button x:Name="AddVaultButton" Content="Register…" ToolTip="Register a vault (Register-SecretVault)"/>
+              <Button x:Name="RemoveVaultButton" Content="Unregister" ToolTip="Unregister-SecretVault (secrets are kept)"/>
+              <Button x:Name="DefaultVaultButton" Content="Set default" ToolTip="Set-SecretVaultDefault"/>
+              <Button x:Name="UnlockButton" Content="Unlock…" ToolTip="Unlock the selected vault with its password"/>
+            </WrapPanel>
+            <Separator Margin="0,6,0,8"/>
+            <TextBlock Text="SecretStore" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <WrapPanel>
+              <Button x:Name="StoreSettingsButton" Content="Store settings…" ToolTip="Authentication, password timeout, password change, reset"/>
+            </WrapPanel>
+          </StackPanel>
+          <ListBox x:Name="VaultList" BorderThickness="0" HorizontalContentAlignment="Stretch"
+                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <Grid Margin="2,4">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                  </Grid.ColumnDefinitions>
+                  <StackPanel>
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="{Binding ModuleName}" FontSize="11" Foreground="#6B7280" TextTrimming="CharacterEllipsis"/>
+                  </StackPanel>
+                  <Border Grid.Column="1" Background="#DBEAFE" CornerRadius="3" Padding="6,1" Margin="6,0,0,0" VerticalAlignment="Center"
+                          Visibility="{Binding IsDefault, Converter={StaticResource BoolToVis}}">
+                    <TextBlock Text="default" FontSize="10.5" Foreground="#1D4ED8"/>
+                  </Border>
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </Border>
+
+      <GridSplitter Grid.Column="1" Width="12" HorizontalAlignment="Stretch" Background="Transparent"/>
+
+      <!-- Secrets -->
+      <Border Grid.Column="2" Style="{StaticResource Card}">
+        <DockPanel>
+          <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="280"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+              <TextBlock x:Name="VaultTitle" Text="No vault selected" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+              <TextBlock x:Name="VaultSubtitle" Foreground="#6B7280" FontSize="11.5" TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
+            <Grid Grid.Column="1" VerticalAlignment="Center">
+              <TextBox x:Name="SearchBox"/>
+              <TextBlock x:Name="SearchHint" Text="Search name or metadata (Ctrl+F)" Margin="8,0,0,0" VerticalAlignment="Center"
+                         Foreground="#9CA3AF" IsHitTestVisible="False"/>
+            </Grid>
+          </Grid>
+          <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+            <Button x:Name="AddSecretButton" Content="New secret" Style="{StaticResource PrimaryButton}" ToolTip="Ctrl+N"/>
+            <Button x:Name="ViewSecretButton" Content="View" ToolTip="Enter / double-click"/>
+            <Button x:Name="CopySecretButton" Content="Copy" ToolTip="Copy value (the password, for credentials) - Ctrl+C"/>
+            <Button x:Name="EditSecretButton" Content="Edit" ToolTip="F2"/>
+            <Button x:Name="RenameSecretButton" Content="Rename"/>
+            <Button x:Name="CopyToVaultButton" Content="Copy to vault…"/>
+            <Button x:Name="DeleteSecretButton" Content="Delete" Style="{StaticResource DangerButton}" ToolTip="Del"/>
+            <Button x:Name="RefreshButton" Content="Refresh" ToolTip="F5"/>
+          </WrapPanel>
+          <Grid>
+            <DataGrid x:Name="SecretGrid" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single" SelectionUnit="FullRow"
+                      HeadersVisibility="Column" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#F0F1F3"
+                      BorderBrush="#E5E7EB" Background="White" RowHeight="30" CanUserAddRows="False" CanUserDeleteRows="False"
+                      CanUserResizeRows="False">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
+                <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="110"/>
+                <DataGridTextColumn Header="Metadata" Binding="{Binding MetadataText}" Width="3*"/>
+              </DataGrid.Columns>
+            </DataGrid>
+            <TextBlock x:Name="EmptyText" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#6B7280"
+                       TextWrapping="Wrap" TextAlignment="Center" MaxWidth="400" IsHitTestVisible="False" Margin="0,40,0,0"/>
+          </Grid>
+        </DockPanel>
+      </Border>
+    </Grid>
+  </DockPanel>
+</Window>

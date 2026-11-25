@@ -1,0 +1,67 @@
+# PowerShell Secrets
+
+A native Windows desktop app for
+[Microsoft.PowerShell.SecretManagement](https://github.com/PowerShell/SecretManagement) and
+[Microsoft.PowerShell.SecretStore](https://github.com/PowerShell/SecretStore), written in C# with
+[Microsoft.UI.Reactor](https://github.com/microsoft/microsoft-ui-reactor). Reactor is a declarative C# framework over WinUI 3.
+
+> Reactor is an **experimental preview** from Microsoft (pinned here to `0.1.0-preview.18`). Expect API changes when upgrading.
+> The earlier PowerShell/WPF version still works and lives in [`legacy/`](legacy/README.md).
+
+## Requirements
+
+- Windows 10 1809+ or Windows 11, x64 (ARM64 builds too)
+- .NET 11 SDK (to build)
+- The SecretManagement modules installed for **PowerShell 7**. The app hosts PowerShell in-process and finds modules in the standard
+  PowerShell 7 module paths:
+
+  ```powershell
+  Install-PSResource Microsoft.PowerShell.SecretManagement, Microsoft.PowerShell.SecretStore -Scope CurrentUser
+  ```
+
+## Build and run
+
+```powershell
+dotnet build src/SecretsManager.App -p:Platform=x64
+dotnet run --project src/SecretsManager.App -p:Platform=x64
+
+# Self-contained, unpackaged: copy the folder anywhere and run publish\SecretsManager.exe
+dotnet publish src/SecretsManager.App -c Release -p:Platform=x64 -r win-x64 --self-contained -o publish
+```
+
+## Features
+
+- **Vaults**: list, register (any extension module, with vault parameters), unregister, set default, unlock.
+- **Secrets**: search (name and metadata), view (masked until revealed), copy, create, edit, rename, copy to another vault, delete.
+- **All secret types**: String, SecureString, PSCredential, Hashtable, ByteArray (load from / save to file), plus metadata.
+- **Password generator** (24 random characters, ambiguous characters left out).
+- **SecretStore settings**: authentication, password timeout, interaction, change password, reset (asks twice, and you must type `RESET`).
+  The first run offers to create a SecretStore vault.
+- **Locked vaults**: any operation on a locked vault asks for the password in a dialog and retries. A wrong password asks again.
+
+Keyboard: **Ctrl+N** new secret, **F5** refresh. In the secret list: **Enter** view, **F2** edit, **Del** delete, **Ctrl+C** copy.
+**Esc** closes a side panel.
+
+## Security notes
+
+- Copies are **cleared from the clipboard after 30 s**, and on exit, if the clipboard still holds them. They are also kept out of
+  Windows clipboard history (Win+V) and cloud clipboard sync.
+- PowerShell runs **inside the app process**. SecretStore's unlock therefore lasts for the session, as it would in a PowerShell window.
+  The hosted runspace uses ExecutionPolicy `Bypass` for itself only; it runs no scripts other than the app's built-in ones.
+- While you view or edit a secret, its value is held as a .NET string. Neither WinUI text controls nor modern .NET support `SecureString`
+  end to end. Values become `SecureString` again when they are handed to the SecretManagement cmdlets.
+- **Metadata is not encrypted.** Keep secrets out of it.
+- Prefer SecretStore `Interaction = None` (the app creates stores that way). With `Prompt`, SecretStore can't prompt inside the app, so
+  the app asks for the password itself.
+
+## Tests
+
+```powershell
+dotnet test --project tests/SecretsManager.Core.Tests                     # 41 tests, ~2 s
+dotnet test --project tests/SecretsManager.Core.Tests -- --explicit only  # real SecretStore round trip (see below)
+pwsh -NoProfile -File tests/Invoke-AppUiTest.ps1                         # drives the built app with UI Automation (build first)
+```
+
+- **Normal tests** never touch your SecretStore. Integration tests use `tests/TestVault`, a small file-based extension vault, under
+  temporary vault names that are removed afterwards.
+- **The explicit test** uses the real SecretStore. It refuses to run if a store already exists for your account, and deletes the one it creates.

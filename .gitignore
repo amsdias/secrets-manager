@@ -1,0 +1,20 @@
+# Build output
+bin/
+obj/
+publish/
+*.binlog
+
+# IDE / tooling
+.vs/
+.vscode/
+*.user
+*.suo
+.idea/
+
+# Test output
+TestResults/
+tests/**/screenshots/
+*.trx
+
+# Claude Code local settings
+.claude/settings.local.json
