@@ -18,12 +18,14 @@ dotnet test --project tests/SecretsManager.Core.Tests        # MTP runner (globa
 dotnet test --project tests/SecretsManager.Core.Tests -- --filter-method "*Locked*"   # subset
 dotnet test --project tests/SecretsManager.Core.Tests -- --explicit only              # real SecretStore round trip
 pwsh -NoProfile -File tests/Invoke-AppUiTest.ps1 [-ExePath publish\SecretsManager.exe]  # UI Automation E2E (build first)
-dotnet publish src/SecretsManager.App -c Release -p:Platform=x64 -r win-x64 --self-contained -o publish
-pwsh -NoProfile -File tools/Install-SecretsManager.ps1       # publish + install to %LOCALAPPDATA%\Programs\SecretsManager + Start menu shortcut
+dotnet publish src/SecretsManager.App -c Release -p:Platform=x64 -r win-x64 --self-contained false -p:PublishSingleFile=true -o publish  # one exe, needs .NET 11
+pwsh -NoProfile -File tools/Install-SecretsManager.ps1       # single-file publish + install to %LOCALAPPDATA%\Programs\SecretsManager + Start menu shortcut
 pwsh -NoProfile -File tools/New-AppIcon.ps1                  # redraw src/SecretsManager.App/Assets/app.ico
 ```
 
-Run the UI test after any change in `src/SecretsManager.App`. The unit tests do not exercise any rendering code.
+Run the UI test after any change in `src/SecretsManager.App`, **after rebuilding** (it runs the existing Debug exe: a stale exe once
+wrote test values into the user's real settings). The unit tests do not exercise any rendering code. The UI test passes
+`--settings-file <temp>` (never the user's settings) and `--ui-test-file <temp>` (export/import skip the file dialog).
 **The user runs the installed copy** (`%LOCALAPPDATA%\Programs\SecretsManager`, Start menu "PowerShell Secrets"; earlier `publish\`).
 After a change, reinstall with `tools/Install-SecretsManager.ps1` (it refuses while that copy is running, so the user must close it) and
 run the UI test with `-ExePath` on the installed exe. Verifying only the Debug build once led to reporting a fix the user couldn't see.
@@ -70,9 +72,11 @@ run the UI test with `-ExePath` on the installed exe. Verifying only the Debug b
   `skills/*.md` are guides, and `skills/recipes/*.cs` are worked examples. The public docs lag the package.
 - **UI tests:** after a UI Automation `SetValue`, WinUI raises `TextChanged` asynchronously, so pause before clicking. TestVault reads
   can race the app's writes, so retry them.
-- **Self-contained publish moves `System.Management.Automation.dll` into the publish root**, which makes it the hosted
-  PowerShell's `$PSHOME`. The built-in modules (Management, Utility, …) must then be in `publish\Modules`, which the
-  `CopyPowerShellBuiltInModulesToPublishRoot` target in the App csproj handles. Without them, `Register-SecretVault` and
+- **A RID-specific publish moves `System.Management.Automation.dll` into the publish root**, which makes it the hosted
+  PowerShell's `$PSHOME`. The built-in modules (Management, Utility, …) must then be in `Modules\` beside it: the
+  `PublishPowerShellBuiltInModulesAtRoot` target rewrites their publish paths *before* single-file bundling. In a single-file
+  build the Windows App SDK forces IncludeAllContentForSelfExtract, so everything extracts to `%TEMP%\.net\SecretsManager\<hash>`
+  and that folder is `$PSHOME`. Single-file also needs `EnableMsixTooling` (set conditionally in the csproj). Without them, `Register-SecretVault` and
   `Write-Verbose` fail, but **only when the app is started from Explorer**.
 - **The UI test launches the app with Explorer's real, captured environment**, where `PSModulePath` contains a literal
   `%ProgramFiles%`. Don't simplify this: launching from pwsh, using `Start-Process -UseNewEnvironment`, or even prepending a
@@ -91,6 +95,11 @@ run the UI test with `-ExePath` on the installed exe. Verifying only the Debug b
 - **`Reset-SecretStore` without a password (Interaction None) writes only `storeconfig`.** The `storefile` appears on first access,
   so `ResetStoreAsync` calls `Get-SecretStoreConfiguration` afterwards. Without that, `IsSecretStoreInitialized` stayed false and
   the app kept offering to create the store.
+- **Themes** (`ThemeManager`) recolor WinUI's shared theme brushes in place and restore them for "System". Some shared brushes
+  throw `UnauthorizedAccessException` on `Color` set; those are skipped (a crash there once killed the window). Popups take their
+  theme from the window's root content, so `RequestedTheme` is set there too. The root paints `Theme.SolidBackground`.
+- **Settings** (`AppSettings`, JSON in `%LOCALAPPDATA%\SecretsManager\settings.json`): theme, auto-lock, clipboard seconds,
+  minimize to tray, last vault. Changes apply at once and are saved. Window placement is saved by Reactor (`PersistPlacement`).
 - **Screenshots:** capture **only the app window** (`PrintWindow` on its handle). Never capture the screen; it can expose the user's
   other windows.
 

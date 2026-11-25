@@ -124,8 +124,10 @@ public sealed record AppState
     public string? Error { get; init; }
     public bool SecretStoreAvailable { get; init; }
     public int? ClipboardSecondsLeft { get; init; }
+    public AppSettings Settings { get; init; } = new();
     /// <summary>Lock after this many idle minutes; 0 = off.</summary>
-    public int AutoLockMinutes { get; init; }
+    public int AutoLockMinutes => Settings.AutoLockMinutes;
+    public bool IsSettingsOpen { get; init; }
 
     public EditorState? Editor { get; init; }
     public ViewerState? Viewer { get; init; }
@@ -140,7 +142,7 @@ public sealed record AppState
     public bool CanUnlock => CurrentVault is { } v &&
         !(v.IsSecretStore && (IsStoreMissing || StoreAuthentication == Core.StoreAuthentication.None));
 
-    public bool HasPanel => Editor is not null || Viewer is not null || VaultForm is not null || StoreSettings is not null;
+    public bool HasPanel => Editor is not null || Viewer is not null || VaultForm is not null || StoreSettings is not null || IsSettingsOpen;
 
     /// <summary>
     /// Search text matches the name or the metadata text. "key=value" also matches secrets whose metadata key is
@@ -188,6 +190,7 @@ public sealed record AppState
         "Ctrl+F  —  Search (try key=value for metadata)\n" +
         "F5  —  Refresh\n" +
         "Ctrl+L  —  Lock now\n" +
+        "Ctrl+,  —  Settings\n" +
         "Esc  —  Close the open panel\n" +
         "F1  —  This list";
 

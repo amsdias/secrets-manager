@@ -15,13 +15,19 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
     readonly TimeProvider _time = time ?? TimeProvider.System;
     readonly Lock _lock = new();
     readonly IAppSettingsStore _settings = settings ?? new InMemorySettingsStore();
-    AppState _state = new() { AutoLockMinutes = (settings?.Load() ?? new AppSettings()).AutoLockMinutes };
+    AppState _state = new() { Settings = Sanitize(settings?.Load() ?? new AppSettings()) };
     TaskCompletionSource<PromptResult?>? _pendingPrompt;
     int _promptId, _loadVersion;
     CancellationTokenSource? _clipboardCts;
     string? _clipboardValue;
 
-    public int ClipboardClearSeconds { get; init; } = 30;
+    int? _clipboardSecondsOverride;
+    /// <summary>From the settings; tests override it.</summary>
+    public int ClipboardClearSeconds
+    {
+        get => _clipboardSecondsOverride ?? _state.Settings.ClipboardClearSeconds;
+        init => _clipboardSecondsOverride = value;
+    }
     /// <summary>PBKDF2 work factor for new export files (tests lower it).</summary>
     public int ExportIterations { get; init; } = SecretsExport.DefaultIterations;
     public AppState State => _state;
@@ -113,6 +119,7 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
     async Task ReloadVaultsAsync(string? select)
     {
         var vaults = (await secrets.GetVaultsAsync()).ToImmutableArray();
+        select ??= State.Settings.LastVault;
         var pick = vaults.FirstOrDefault(v => v.Name == select) ?? vaults.FirstOrDefault(v => v.IsDefault) ?? vaults.FirstOrDefault();
         Update(s => s with { Vaults = vaults, SelectedVault = pick?.Name, HasLoaded = true });
         if (pick is null) Update(s => s with { Secrets = [], SelectedSecret = null, Status = "No vaults registered." });
@@ -123,6 +130,7 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
     {
         if (name == State.SelectedVault) return Task.CompletedTask;
         Update(s => s with { SelectedVault = name, Secrets = [], SelectedSecret = null, IsVaultLocked = false, IsStoreMissing = false, Search = "" });
+        if (name is not null) TrySaveSettings(x => x with { LastVault = name });
         return Run(LoadSecretsAsync);
     }
 
@@ -480,12 +488,46 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
     public Task SetAutoLockMinutesAsync(int minutes) => Run(() =>
     {
         ArgumentOutOfRangeException.ThrowIfNegative(minutes);
-        Update(s => s with { AutoLockMinutes = minutes });
+        SaveSettings(x => x with { AutoLockMinutes = minutes });
         NotifyActivity();
-        _settings.Save(_settings.Load() with { AutoLockMinutes = minutes });
         SetStatus(minutes == 0 ? "Auto-lock is off." : $"The app locks after {minutes} minute(s) without activity.");
         return Task.CompletedTask;
     });
+
+    // ------------------------------------------------------------------ settings
+
+    public static IReadOnlyList<int> ClipboardChoices { get; } = [10, 30, 60, 120];
+
+    public void OpenSettings() => Update(s => s with { IsSettingsOpen = true });
+    public void CloseSettings() => Update(s => s with { IsSettingsOpen = false });
+
+    /// <summary>Applies a settings change immediately and saves it.</summary>
+    public Task UpdateSettingsAsync(Func<AppSettings, AppSettings> change) => Run(() =>
+    {
+        SaveSettings(change);
+        NotifyActivity();
+        return Task.CompletedTask;
+    });
+
+    void SaveSettings(Func<AppSettings, AppSettings> change)
+    {
+        Update(s => s with { Settings = Sanitize(change(s.Settings)) });
+        _settings.Save(State.Settings);
+    }
+
+    /// <summary>For incidental settings (the last vault): a failed save must not interrupt the user.</summary>
+    void TrySaveSettings(Func<AppSettings, AppSettings> change)
+    {
+        try { SaveSettings(change); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
+    static AppSettings Sanitize(AppSettings s) => s with
+    {
+        AutoLockMinutes = Math.Max(0, s.AutoLockMinutes),
+        ClipboardClearSeconds = Math.Clamp(s.ClipboardClearSeconds, 5, 600),
+        Theme = AppThemes.Normalize(s.Theme),
+    };
 
     public Task LockAsync() => LockAsync("Locked.");
 

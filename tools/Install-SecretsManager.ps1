@@ -2,9 +2,13 @@
 .SYNOPSIS
     Publishes Secrets Manager and installs it for the current user, with a Start menu shortcut.
 .DESCRIPTION
-    Builds a self-contained release into a temporary folder, mirrors it into the install folder
+    Builds a release into a temporary folder, mirrors it into the install folder
     (default %LOCALAPPDATA%\Programs\SecretsManager) and creates a "PowerShell Secrets" Start menu shortcut.
     No admin rights. Your vaults, secrets and settings (%LOCALAPPDATA%\SecretsManager) are never touched.
+
+    By default the app is ONE framework-dependent file, SecretsManager.exe, which needs the .NET 11 Desktop Runtime
+    (included with the .NET 11 SDK). On first start it extracts itself to %TEMP%\.net\SecretsManager.
+    -SelfContained builds the larger folder version instead, which needs no .NET installed.
 .EXAMPLE
     pwsh -File tools/Install-SecretsManager.ps1              # build and install (or update)
 .EXAMPLE
@@ -17,6 +21,8 @@ param(
     [string]$Destination = (Join-Path $env:LOCALAPPDATA 'Programs\SecretsManager'),
     [switch]$Desktop,
     [switch]$Uninstall,
+    # Folder build that includes the .NET runtime (no single file).
+    [switch]$SelfContained,
     # An existing publish folder to install instead of building one.
     [string]$Source
 )
@@ -53,7 +59,9 @@ if ($Uninstall) {
 $staging = $null
 if (-not $Source) {
     $staging = Join-Path ([IO.Path]::GetTempPath()) "SecretsManager-publish-$([guid]::NewGuid().ToString('N'))"
-    dotnet publish (Join-Path $repo 'src\SecretsManager.App') -c Release -p:Platform=x64 -r win-x64 --self-contained -o $staging
+    $mode = if ($SelfContained) { @('--self-contained') }
+            else { @('--self-contained', 'false', '-p:PublishSingleFile=true', '-p:DebugType=embedded') }
+    dotnet publish (Join-Path $repo 'src\SecretsManager.App') -c Release -p:Platform=x64 -r win-x64 @mode -o $staging
     if ($LASTEXITCODE) { throw "dotnet publish failed (exit $LASTEXITCODE)" }
     $Source = $staging
 }

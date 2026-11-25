@@ -28,6 +28,35 @@ sealed class SecretsApp : Component
         var window = UseWindow();
         var closeReady = UseRef(false);
         var (searchRef, focusSearch) = this.UseElementFocus(FocusState.Keyboard);
+        var theme = s.Settings.Theme;
+        UseEffect(() => ThemeManager.Apply(theme, window), theme);
+
+        var tray = UseTrayIcon(new TrayIconSpec(AppServices.TrayIcon!, "PowerShell Secrets", IsVisible: s.Settings.MinimizeToTray && AppServices.TrayIcon is not null));
+        UseEffect(() =>
+        {
+            if (window is null || tray is null) return () => { };
+            void Restore()
+            {
+                tray.HideFlyout();
+                window.Show();
+                (window.AppWindow.Presenter as Microsoft.UI.Windowing.OverlappedPresenter)?.Restore();
+                window.Activate();
+            }
+            void OnClick(object? sender, EventArgs e) => Restore();
+            void OnRightClick(object? sender, EventArgs e) => tray.ShowFlyout(VStack(4,
+                Button("Show", Restore).HAlign(HorizontalAlignment.Stretch),
+                Button("Lock now", () => { tray.HideFlyout(); _ = Store.LockAsync(); }).HAlign(HorizontalAlignment.Stretch),
+                Button("Exit", () => { tray.HideFlyout(); window.Close(); }).HAlign(HorizontalAlignment.Stretch)
+            ).Padding(8).MinWidth(140));
+            void OnState(object? sender, WindowState state)
+            {
+                if (state == WindowState.Minimized && Store.State.Settings.MinimizeToTray) window.Hide();
+            }
+            tray.Click += OnClick;
+            tray.RightClick += OnRightClick;
+            window.StateChanged += OnState;
+            return () => { tray.Click -= OnClick; tray.RightClick -= OnRightClick; window.StateChanged -= OnState; };
+        }, tray?.Id ?? "");
 
         UseEffect(() => { _ = Store.InitializeAsync(); }, []);
 
@@ -83,7 +112,9 @@ sealed class SecretsApp : Component
             ).Grid(row: 1),
             StatusBar(s).Grid(row: 2),
             s.Prompt is null ? null : Component<PromptDialog, PromptRequest>(s.Prompt).WithKey($"prompt-{s.Prompt.Id}")
-        ).OnPreviewKeyDown((_, e) => OnGlobalKey(e, focusSearch))
+        ).Background(Theme.SolidBackground)
+         .RequestedTheme(ThemeManager.ElementThemeFor(theme))
+         .OnPreviewKeyDown((_, e) => OnGlobalKey(e, focusSearch))
          .OnPointerMoved((_, _) => Store.NotifyActivity());
     }
 
@@ -231,10 +262,6 @@ sealed class SecretsApp : Component
 
     Element StatusBar(AppState s)
     {
-        int[] choices = AppStore.AutoLockChoices.Contains(s.AutoLockMinutes)
-            ? [.. AppStore.AutoLockChoices]
-            : [.. AppStore.AutoLockChoices, s.AutoLockMinutes];
-        var labels = choices.Select(m => m == 0 ? "Off" : $"{m} min").ToArray();
         return Border(
             Grid(
                 columns: [GridSize.Star(), GridSize.Auto, GridSize.Auto, GridSize.Auto, GridSize.Auto],
@@ -244,14 +271,8 @@ sealed class SecretsApp : Component
                     ? TextBlock($"Clipboard clears in {left}s").Foreground(Theme.AccentText).Margin(12, 0, 12, 0).VAlign(VerticalAlignment.Center).AutomationId("ClipboardText").Grid(row: 0, column: 1)
                     : null,
                 s.IsBusy ? ProgressRing().Width(16).Height(16).Margin(0, 0, 12, 0).Grid(row: 0, column: 2) : null,
-                HStack(6,
-                    Caption("Auto-lock").Opacity(0.8).VAlign(VerticalAlignment.Center),
-                    ComboBox(labels, Array.IndexOf(choices, s.AutoLockMinutes), i =>
-                        {
-                            if (i >= 0 && choices[i] != Store.State.AutoLockMinutes) _ = Store.SetAutoLockMinutesAsync(choices[i]);
-                        })
-                        .ToolTip("Lock after this long without keyboard or mouse activity").AutomationName("Auto-lock").AutomationId("AutoLockCombo").MinWidth(100)
-                ).Margin(0, 0, 8, 0).Grid(row: 0, column: 3),
+                Button("Settings", Store.OpenSettings).ToolTip("Theme, auto-lock, clipboard and tray (Ctrl+,)")
+                    .AutomationId("SettingsButton").Margin(0, 0, 8, 0).Grid(row: 0, column: 3),
                 Button("Lock", () => _ = Store.LockAsync())
                     .ToolTip("Lock now: close open secrets, clear the clipboard and lock SecretStore (Ctrl+L)").AutomationId("LockButton").Grid(row: 0, column: 4))
         ).Background(Theme.LayerFill).Padding(14, 4, 14, 4);
@@ -270,6 +291,7 @@ sealed class SecretsApp : Component
             case VirtualKey.L when ctrl: _ = Store.LockAsync(); break;
             case VirtualKey.E when ctrl && !s.HasPanel && s.CurrentSecret is not null: _ = Store.OpenEditSecretAsync(); break;
             case VirtualKey.F1: _ = Store.ShowShortcutsAsync(); break;
+            case (VirtualKey)188 when ctrl && !s.HasPanel: Store.OpenSettings(); break; // Ctrl+, (VK_OEM_COMMA)
             default: return;
         }
         e.Handled = true;
@@ -281,6 +303,7 @@ sealed class SecretsApp : Component
     async Task ExportAsync()
     {
         if (Store.State.CurrentVault is not { } vault) return;
+        if (AppServices.UiTestFilePath is { } testPath) { await Store.ExportSelectedVaultAsync(testPath); return; }
         var target = await PickSaveFileAsync(new SaveFilePickerOptions(
             new[] { new FileTypeChoice("Secrets Manager export", new[] { SecretsExport.FileExtension }) }, $"{vault.Name}-{DateTime.Now:yyyy-MM-dd}"));
         if (target is null) return;
@@ -289,6 +312,7 @@ sealed class SecretsApp : Component
 
     async Task ImportAsync()
     {
+        if (AppServices.UiTestFilePath is { } testPath) { await Store.ImportIntoSelectedVaultAsync(testPath); return; }
         var file = await PickFileAsync(new FilePickerOptions(FileTypeFilter: new[] { SecretsExport.FileExtension }) { Title = "Import secrets" });
         if (file is null) return;
         await Store.ImportIntoSelectedVaultAsync(file.Path);
@@ -302,6 +326,7 @@ sealed class SecretsApp : Component
         Store.CloseViewer();
         Store.CloseVaultForm();
         Store.CloseStoreSettings();
+        Store.CloseSettings();
     }
 
     Element PanelContent(AppState s) =>
@@ -309,7 +334,35 @@ sealed class SecretsApp : Component
         s.Viewer is { } v ? ViewerPanel(v) :
         s.VaultForm is { } f ? VaultFormPanel(f, s) :
         s.StoreSettings is { } st ? StoreSettingsPanel(st) :
+        s.IsSettingsOpen ? SettingsPanel(s.Settings) :
         Empty();
+
+    Element SettingsPanel(AppSettings st)
+    {
+        void Set(Func<AppSettings, AppSettings> change) => _ = Store.UpdateSettingsAsync(change);
+        static int[] With(IEnumerable<int> choices, int current) => choices.Contains(current) ? [.. choices] : [.. choices, current];
+
+        var themes = AppThemes.All;
+        var lockChoices = With(AppStore.AutoLockChoices, st.AutoLockMinutes);
+        var clipChoices = With(AppStore.ClipboardChoices, st.ClipboardClearSeconds);
+        return VStack(12,
+            Subtitle("Settings"),
+            ComboBox(themes.Select(AppThemes.DisplayName).ToArray(), themes.ToList().IndexOf(st.Theme),
+                    i => { if (i >= 0 && themes[i] != Store.State.Settings.Theme) Set(x => x with { Theme = themes[i] }); })
+                .Header("Theme").AutomationId("ThemeCombo").HAlign(HorizontalAlignment.Stretch),
+            ComboBox(lockChoices.Select(m => m == 0 ? "Never" : $"After {m} minute(s) without activity").ToArray(), Array.IndexOf(lockChoices, st.AutoLockMinutes),
+                    i => { if (i >= 0 && lockChoices[i] != Store.State.Settings.AutoLockMinutes) _ = Store.SetAutoLockMinutesAsync(lockChoices[i]); })
+                .Header("Auto-lock").AutomationId("AutoLockCombo").HAlign(HorizontalAlignment.Stretch),
+            Caption("Locking closes open secrets, clears a copied value and locks SecretStore.").TextWrapping().Opacity(0.7),
+            ComboBox(clipChoices.Select(x => $"After {x} seconds").ToArray(), Array.IndexOf(clipChoices, st.ClipboardClearSeconds),
+                    i => { if (i >= 0 && clipChoices[i] != Store.State.Settings.ClipboardClearSeconds) Set(x => x with { ClipboardClearSeconds = clipChoices[i] }); })
+                .Header("Clear copied values from the clipboard").AutomationId("ClipboardCombo").HAlign(HorizontalAlignment.Stretch),
+            CheckBox(st.MinimizeToTray, v => Set(x => x with { MinimizeToTray = v }), "Minimize to the notification area (tray icon)")
+                .AutomationId("TrayCheck"),
+            Caption(JsonFileSettingsStore.DefaultPath).FontFamily("Consolas").Opacity(0.6),
+            Buttons(Button("Close", Store.CloseSettings).AccentButton().AutomationId("SettingsCloseButton"))
+        ).MinWidth(480).AutomationId("SettingsPanel");
+    }
 
     static Element? ErrorText(string? error) =>
         error is null ? null : TextBlock(error).TextWrapping().Foreground(Theme.SystemCritical).AutomationId("PanelError");

@@ -22,12 +22,14 @@ A native Windows desktop app for
 ## Install
 
 ```powershell
-pwsh -File tools/Install-SecretsManager.ps1             # build, install to %LOCALAPPDATA%\Programs\SecretsManager, Start menu shortcut
+pwsh -File tools/Install-SecretsManager.ps1             # one-file build, install to %LOCALAPPDATA%\Programs\SecretsManager, Start menu shortcut
+pwsh -File tools/Install-SecretsManager.ps1 -SelfContained  # folder build that doesn't need .NET installed
 pwsh -File tools/Install-SecretsManager.ps1 -Desktop    # also a desktop shortcut
 pwsh -File tools/Install-SecretsManager.ps1 -Uninstall  # remove the app and its shortcuts (vaults, secrets and settings stay)
 ```
 
-Run it again to update (close the app first). No admin rights are needed.
+Run it again to update (close the app first). No admin rights are needed. The default build is a single, framework-dependent
+`SecretsManager.exe`: it needs the .NET 11 Desktop Runtime and extracts itself to `%TEMP%\.net\SecretsManager` on first start.
 
 ## Build and run
 
@@ -55,7 +57,11 @@ dotnet publish src/SecretsManager.App -c Release -p:Platform=x64 -r win-x64 --se
   The first run offers to create a SecretStore vault.
 - **Locked vaults**: any operation on a locked vault asks for the password in a dialog and retries. A wrong password asks again.
 
-Keyboard: **Ctrl+N** new secret, **F5** refresh, **Ctrl+F** search, **Ctrl+E** edit, **Ctrl+L** lock, **F1** list of shortcuts.
+- **Settings** (Ctrl+,): color theme (Windows light/dark, or Catppuccin Latte, Frappé, Macchiato, Mocha), auto-lock time,
+  how long copied values stay on the clipboard, and minimize to the notification area (tray icon: click to show, right-click for
+  Show / Lock now / Exit). The window's size and position and the last selected vault are remembered.
+
+Keyboard: **Ctrl+N** new secret, **Ctrl+,** settings, **F5** refresh, **Ctrl+F** search, **Ctrl+E** edit, **Ctrl+L** lock, **F1** list of shortcuts.
 In the secret list: **Enter** view, **F2** edit, **Del** delete, **Ctrl+C** copy. **Esc** closes a side panel.
 
 ## Security notes

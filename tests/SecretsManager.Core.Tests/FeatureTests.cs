@@ -239,6 +239,41 @@ public sealed class FeatureTests : IDisposable
         Assert.Equal(new AppSettings(), store.Load());
     }
 
+    [Fact]
+    public async Task The_last_selected_vault_is_reselected_on_the_next_start()
+    {
+        _svc.AddVault("a", isDefault: true);
+        _svc.AddVault("b");
+        var settings = new InMemorySettingsStore();
+        var first = Store(settings: settings);
+        await first.InitializeAsync();
+        Assert.Equal("a", first.State.SelectedVault);
+        await first.SelectVaultAsync("b");
+        Assert.Equal("b", settings.Current.LastVault);
+
+        var second = Store(settings: settings);
+        await second.InitializeAsync();
+        Assert.Equal("b", second.State.SelectedVault);
+
+        _svc.Vaults.Remove("b"); // gone: fall back to the default vault
+        var third = Store(settings: settings);
+        await third.InitializeAsync();
+        Assert.Equal("a", third.State.SelectedVault);
+    }
+
+    [Fact]
+    public async Task Settings_changes_apply_at_once_are_saved_and_sanitized()
+    {
+        var settings = new InMemorySettingsStore(new AppSettings(Theme: "mocha"));
+        var store = new AppStore(_svc, _clip, settings: settings);
+        Assert.Equal("Mocha", store.State.Settings.Theme); // normalized on load
+        await store.UpdateSettingsAsync(s => s with { Theme = "Latte", ClipboardClearSeconds = 60, MinimizeToTray = true });
+        Assert.Equal(new AppSettings(Theme: "Latte", ClipboardClearSeconds: 60, MinimizeToTray: true), settings.Current);
+        Assert.Equal(60, store.ClipboardClearSeconds);
+        await store.UpdateSettingsAsync(s => s with { Theme = "Neon", ClipboardClearSeconds = 0 });
+        Assert.Equal(("System", 5), (settings.Current.Theme, settings.Current.ClipboardClearSeconds));
+    }
+
     // ------------------------------------------------------------------ metadata
 
     static AppState WithSecrets(params (string Name, Dictionary<string, string> Meta)[] secrets) => new()

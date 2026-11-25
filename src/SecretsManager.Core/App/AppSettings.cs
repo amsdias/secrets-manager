@@ -2,8 +2,31 @@ using System.Text.Json;
 
 namespace SecretsManager.Core.App;
 
-/// <summary>App preferences (not secrets). AutoLockMinutes: 0 turns auto-lock off.</summary>
-public sealed record AppSettings(int AutoLockMinutes = 10);
+/// <summary>
+/// App preferences (never secrets). AutoLockMinutes: 0 turns auto-lock off. Theme: one of <see cref="AppThemes.All"/>.
+/// LastVault: reselected at startup.
+/// </summary>
+public sealed record AppSettings(
+    int AutoLockMinutes = 10,
+    string Theme = AppThemes.System,
+    int ClipboardClearSeconds = 30,
+    bool MinimizeToTray = false,
+    string? LastVault = null);
+
+public static class AppThemes
+{
+    public const string System = "System";
+    public static IReadOnlyList<string> All { get; } = [System, "Latte", "Frappe", "Macchiato", "Mocha"];
+
+    public static string DisplayName(string theme) => theme switch
+    {
+        System => "Windows (light or dark)",
+        "Frappe" => "Catppuccin Frappé",
+        _ => "Catppuccin " + theme,
+    };
+
+    public static string Normalize(string? theme) => All.FirstOrDefault(t => t.Equals(theme, StringComparison.OrdinalIgnoreCase)) ?? System;
+}
 
 public interface IAppSettingsStore
 {

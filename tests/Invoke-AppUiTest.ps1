@@ -57,6 +57,24 @@ function Select-Row($name, $listId) {
 function Get-Info($vault, $name) { try { Get-SecretInfo -Vault $vault -Name $name } catch { $null } }
 function Get-Value($vault, $name) { try { Get-Secret -Vault $vault -Name $name -AsPlainText } catch { $null } }
 function Pass($m) { $script:passed++; Write-Host "PASS $m" }
+function Save-Shot($name) {
+    if (-not $ScreenshotDir) { return }
+    Add-Type -AssemblyName System.Drawing
+    if (-not ('SgUi.Native' -as [type])) {
+        Add-Type -Namespace SgUi -Name Native -MemberDefinition '[DllImport("user32.dll")] public static extern bool PrintWindow(System.IntPtr h, System.IntPtr dc, uint f);'
+    }
+    $r = $script:main.Current.BoundingRectangle; $bmp = [Drawing.Bitmap]::new([int]$r.Width, [int]$r.Height); $g = [Drawing.Graphics]::FromImage($bmp)
+    $dc = $g.GetHdc(); [void][SgUi.Native]::PrintWindow([IntPtr]$script:main.Current.NativeWindowHandle, $dc, 2); $g.ReleaseHdc($dc)
+    New-Item -ItemType Directory -Force -Path $ScreenshotDir | Out-Null
+    $bmp.Save((Join-Path $ScreenshotDir "$name.png")); $g.Dispose(); $bmp.Dispose()
+}
+function Select-ComboItem($comboId, $itemName) {
+    $combo = Wait-For { ById $comboId } "combo $comboId"
+    $combo.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+    $item = Wait-For { $combo.FindFirst($TS::Descendants, (Cond $AE::NameProperty $itemName)) } "item '$itemName'"
+    $item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    try { $combo.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Collapse() } catch { }
+}
 
 $proc = $null
 try {
@@ -82,6 +100,11 @@ try {
     [void](Wait-For { (Test-Path $envFile) -and (Get-Item $envFile).Length -gt 0 } "Explorer's environment" 15)
     Start-Sleep -Milliseconds 300
     $psi = [System.Diagnostics.ProcessStartInfo]::new($exe)
+    # Test-only switches: a private settings file (so the user's theme and last vault are untouched) and a file path
+    # that export/import use instead of a file dialog.
+    $settingsFile = Join-Path $tmp "sg-settings-$suffix.json"
+    $exportFile = Join-Path $tmp "sg-export-$suffix.smsecrets"
+    foreach ($a in '--settings-file', $settingsFile, '--ui-test-file', $exportFile) { $psi.ArgumentList.Add($a) }
     $psi.UseShellExecute = $false
     $psi.WorkingDirectory = Split-Path $exe
     $psi.Environment.Clear()
@@ -174,6 +197,23 @@ try {
     if (-not $registered) { throw "vault registered through the form not found" }
     Pass 'vault registered through the Register form'
 
+    # --- export the plain vault to an encrypted file, then import it into the new (empty) vault
+    Select-Row $plain 'VaultList'
+    [void](Wait-For { ByName 'existing' } 'plain vault listed')
+    Invoke-El (Wait-For { $b = ById 'ExportButton'; if ($b -and $b.Current.IsEnabled) { $b } } 'Export enabled')
+    Set-Val (Wait-For { ById 'PromptPassword' } 'export password prompt') 'exp#123'
+    Set-Val (ById 'PromptConfirm') 'exp#123'
+    Invoke-El (Wait-For { ByName 'Export' $CT::Button } 'Export button in the dialog')
+    [void](Wait-For { (Test-Path $exportFile) -and (ById 'StatusText').Current.Name -like 'Exported*' } 'export file')
+    if ((Get-Content $exportFile -Raw) -match 'hello|existing') { throw 'the export file contains plain text' }
+    Pass 'vault exported to an encrypted file'
+    Select-Row $byName 'VaultList'
+    Invoke-El (Wait-For { $b = ById 'ImportButton'; if ($b -and $b.Current.IsEnabled) { $b } } 'Import enabled')
+    Set-Val (Wait-For { ById 'PromptPassword' } 'import password prompt') 'exp#123'
+    Invoke-El (Wait-For { ByName 'Open' $CT::Button } 'Open button in the dialog')
+    [void](Wait-For { (Get-Value $byName existing) -eq 'hello' } 'imported secret in the new vault')
+    Pass 'export file imported into another vault'
+
     # --- copy starts the clipboard countdown
     Select-Row $locked 'VaultList'
     Select-Row 'lockedsecret' 'SecretList'
@@ -186,14 +226,20 @@ try {
     [void](Wait-For { -not (ById 'ClipboardText') -and (ById 'StatusText').Current.Name -like 'Locked*' } 'lock to clear the clipboard countdown')
     Pass 'Lock cleared the clipboard countdown'
 
-    if ($ScreenshotDir) {
-        Add-Type -AssemblyName System.Drawing
-        Add-Type -Namespace SgUi -Name Native -MemberDefinition '[DllImport("user32.dll")] public static extern bool PrintWindow(System.IntPtr h, System.IntPtr dc, uint f);'
-        $r = $main.Current.BoundingRectangle; $bmp = [Drawing.Bitmap]::new([int]$r.Width, [int]$r.Height); $g = [Drawing.Graphics]::FromImage($bmp)
-        $dc = $g.GetHdc(); [void][SgUi.Native]::PrintWindow([IntPtr]$main.Current.NativeWindowHandle, $dc, 2); $g.ReleaseHdc($dc)
-        New-Item -ItemType Directory -Force -Path $ScreenshotDir | Out-Null
-        $bmp.Save((Join-Path $ScreenshotDir 'app-final.png'))
+    Save-Shot 'app-final'
+
+    # --- themes: every choice applies and is saved to the (test) settings file
+    Invoke-El (ById 'SettingsButton')
+    [void](Wait-For { ById 'ThemeCombo' } 'settings panel')
+    foreach ($t in @(@('Catppuccin Latte', 'Latte'), @('Catppuccin Frappé', 'Frappe'), @('Catppuccin Macchiato', 'Macchiato'),
+                     @('Catppuccin Mocha', 'Mocha'), @('Windows (light or dark)', 'System'))) {
+        Select-ComboItem 'ThemeCombo' $t[0]
+        [void](Wait-For { (Test-Path $settingsFile) -and (Get-Content $settingsFile -Raw | ConvertFrom-Json).Theme -eq $t[1] } "theme $($t[1]) saved")
+        Start-Sleep -Milliseconds 400
+        Save-Shot "theme-$($t[1])"
     }
+    Pass 'every theme applies and is saved'
+    Invoke-El (ById 'SettingsCloseButton')
 
     $main.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close()
     if (-not $proc.WaitForExit(15000)) { throw 'app did not exit after closing its window' }
@@ -203,5 +249,6 @@ try {
 finally {
     if ($proc -and -not $proc.HasExited) { $proc.Kill() }
     foreach ($v in $plain, $locked, "SgUiByName_$suffix") { Unregister-SecretVault -Name $v -ErrorAction SilentlyContinue }
+    Remove-Item (Join-Path $tmp "sg-settings-$suffix.json"), (Join-Path $tmp "sg-export-$suffix.smsecrets") -ErrorAction SilentlyContinue
     Remove-Item "$tmp$plain.clixml*", "$tmp$locked.clixml*", "$($tmp)SgUiByName_$($suffix).clixml*" -ErrorAction SilentlyContinue
 }
