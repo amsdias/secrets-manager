@@ -32,3 +32,22 @@ jobs:
       # tests need a desktop session and a real store, so they run locally only.
       - name: Test
         run: dotnet test --project tests/SecretsManager.Core.Tests -c Release
+
+      # The shipping build: compressed self-contained app (PowerShell modules placed before bundling) + NativeAOT CLI.
+      - name: Publish
+        shell: pwsh
+        run: |
+          dotnet publish src/SecretsManager.App -c Release -p:Platform=x64 -r win-x64 --self-contained -p:PublishSingleFile=true -p:DebugType=embedded -o publish
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          dotnet publish src/SecretsManager.Cli -c Release -r win-x64 -o publish
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $files = Get-ChildItem publish -File
+          $files | Format-Table Name, @{ n = 'MB'; e = { [math]::Round($_.Length / 1MB, 1) } } | Out-String | Write-Host
+          if (($files.Name | Sort-Object) -join ',' -ne 'SecretsManager.Cli.exe,SecretsManager.exe') { throw "unexpected publish output: $($files.Name -join ', ')" }
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: SecretsManager-win-x64
+          path: publish/*.exe
+          if-no-files-found: error
