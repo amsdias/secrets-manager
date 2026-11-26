@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 This is a native Windows GUI for PowerShell SecretManagement and SecretStore: C# on .NET 11, with the UI in **Microsoft.UI.Reactor**,
-an experimental MVU-style framework over WinUI 3. The app is unpackaged and self-contained. `legacy/` holds the earlier
+an experimental MVU-style framework over WinUI 3. The app is unpackaged; it ships as a self-contained, compressed single-file exe plus a NativeAOT console relay. `legacy/` holds the earlier
 PowerShell/WPF version; it still works and has its own README and tests. The user chose this stack explicitly (Reactor on .NET 11,
 unpackaged, legacy kept side by side).
 
@@ -18,8 +18,9 @@ dotnet test --project tests/SecretsManager.Core.Tests        # MTP runner (globa
 dotnet test --project tests/SecretsManager.Core.Tests -- --filter-method "*Locked*"   # subset
 dotnet test --project tests/SecretsManager.Core.Tests -- --explicit only              # real SecretStore round trip
 pwsh -NoProfile -File tests/Invoke-AppUiTest.ps1 [-ExePath publish\SecretsManager.exe]  # UI Automation E2E (build first)
-dotnet publish src/SecretsManager.App -c Release -p:Platform=x64 -r win-x64 --self-contained false -p:PublishSingleFile=true -o publish  # one exe, needs .NET 11
-pwsh -NoProfile -File tools/Install-SecretsManager.ps1       # single-file publish + install to %LOCALAPPDATA%\Programs\SecretsManager + Start menu shortcut
+dotnet publish src/SecretsManager.App -c Release -p:Platform=x64 -r win-x64 --self-contained -p:PublishSingleFile=true -p:DebugType=embedded -o publish  # compressed
+dotnet publish src/SecretsManager.Cli -c Release -r win-x64 -o publish   # NativeAOT (needs the MSVC linker)
+pwsh -NoProfile -File tools/Install-SecretsManager.ps1       # both publishes + install to %LOCALAPPDATA%\Programs\SecretsManager + Start menu shortcut
 pwsh -NoProfile -File tools/New-AppIcon.ps1                  # redraw src/SecretsManager.App/Assets/app.ico
 ```
 

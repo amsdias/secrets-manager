@@ -6,9 +6,9 @@
     (default %LOCALAPPDATA%\Programs\SecretsManager) and creates a "PowerShell Secrets" Start menu shortcut.
     No admin rights. Your vaults, secrets and settings (%LOCALAPPDATA%\SecretsManager) are never touched.
 
-    By default the app is ONE framework-dependent file, SecretsManager.exe, which needs the .NET 11 Desktop Runtime
-    (included with the .NET 11 SDK). On first start it extracts itself to %TEMP%\.net\SecretsManager.
-    -SelfContained builds the larger folder version instead, which needs no .NET installed.
+    The app is two files: SecretsManager.exe (self-contained, compressed single file: no .NET needed; each new version
+    extracts itself to %TEMP%\.net\SecretsManager on first start) and SecretsManager.Cli.exe (native, for "get").
+    -FrameworkDependent builds a larger, uncompressed SecretsManager.exe that needs the .NET 11 Desktop Runtime.
 .EXAMPLE
     pwsh -File tools/Install-SecretsManager.ps1              # build and install (or update)
 .EXAMPLE
@@ -21,8 +21,8 @@ param(
     [string]$Destination = (Join-Path $env:LOCALAPPDATA 'Programs\SecretsManager'),
     [switch]$Desktop,
     [switch]$Uninstall,
-    # Folder build that includes the .NET runtime (no single file).
-    [switch]$SelfContained,
+    # Uncompressed single file that uses the installed .NET 11 Desktop Runtime.
+    [switch]$FrameworkDependent,
     # An existing publish folder to install instead of building one.
     [string]$Source
 )
@@ -59,12 +59,12 @@ if ($Uninstall) {
 $staging = $null
 if (-not $Source) {
     $staging = Join-Path ([IO.Path]::GetTempPath()) "SecretsManager-publish-$([guid]::NewGuid().ToString('N'))"
-    $mode = if ($SelfContained) { @('--self-contained') }
-            else { @('--self-contained', 'false', '-p:PublishSingleFile=true', '-p:DebugType=embedded') }
-    dotnet publish (Join-Path $repo 'src\SecretsManager.App') -c Release -p:Platform=x64 -r win-x64 @mode -o $staging
+    $selfContained = if ($FrameworkDependent) { 'false' } else { 'true' }
+    dotnet publish (Join-Path $repo 'src\SecretsManager.App') -c Release -p:Platform=x64 -r win-x64 --self-contained $selfContained `
+        -p:PublishSingleFile=true -p:DebugType=embedded -o $staging
     if ($LASTEXITCODE) { throw "dotnet publish failed (exit $LASTEXITCODE)" }
-    # The console front end for "get" (PowerShell doesn't capture a GUI exe's output).
-    dotnet publish (Join-Path $repo 'src\SecretsManager.Cli') -c Release -r win-x64 @mode -o $staging
+    # The console front end for "get" (PowerShell doesn't capture a GUI exe's output); NativeAOT, set in its csproj.
+    dotnet publish (Join-Path $repo 'src\SecretsManager.Cli') -c Release -r win-x64 -o $staging
     if ($LASTEXITCODE) { throw "dotnet publish of the CLI failed (exit $LASTEXITCODE)" }
     $Source = $staging
 }

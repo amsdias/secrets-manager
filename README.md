@@ -23,13 +23,14 @@ A native Windows desktop app for
 
 ```powershell
 pwsh -File tools/Install-SecretsManager.ps1             # one-file build, install to %LOCALAPPDATA%\Programs\SecretsManager, Start menu shortcut
-pwsh -File tools/Install-SecretsManager.ps1 -SelfContained  # folder build that doesn't need .NET installed
+pwsh -File tools/Install-SecretsManager.ps1 -FrameworkDependent  # needs the .NET 11 Desktop Runtime instead (bigger: no compression)
 pwsh -File tools/Install-SecretsManager.ps1 -Desktop    # also a desktop shortcut
 pwsh -File tools/Install-SecretsManager.ps1 -Uninstall  # remove the app and its shortcuts (vaults, secrets and settings stay)
 ```
 
-Run it again to update (close the app first). No admin rights are needed. The default build is a single, framework-dependent
-`SecretsManager.exe`: it needs the .NET 11 Desktop Runtime and extracts itself to `%TEMP%\.net\SecretsManager` on first start.
+Run it again to update (close the app first). No admin rights are needed. Nothing else needs installing: `SecretsManager.exe` is a
+self-contained, compressed single file (about 90 MB) that unpacks itself to `%TEMP%\.net\SecretsManager` the first time each
+version starts, and `SecretsManager.Cli.exe` is a small native exe.
 
 ## Build and run
 
