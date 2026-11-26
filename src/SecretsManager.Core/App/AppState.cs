@@ -140,6 +140,10 @@ public sealed record AppState
     /// <summary>Lock after this many idle minutes; 0 = off.</summary>
     public int AutoLockMinutes => Settings.AutoLockMinutes;
     public bool IsSettingsOpen { get; init; }
+    /// <summary>The local date that expiry warnings are measured against (kept current by AppStore).</summary>
+    public DateOnly Today { get; init; } = DateOnly.FromDateTime(DateTime.Now);
+    /// <summary>A newer release on GitHub, found by the startup check; null when none (or not checked).</summary>
+    public UpdateInfo? UpdateAvailable { get; init; }
 
     public EditorState? Editor { get; init; }
     public ViewerState? Viewer { get; init; }
@@ -193,6 +197,11 @@ public sealed record AppState
                                                          kv.Value.Contains(value, StringComparison.OrdinalIgnoreCase)))).ToList();
         }
     }
+
+    public SecretExpiry ExpiryOf(SecretEntry entry) => SecretExpiry.Of(entry.Metadata, Today);
+
+    /// <summary>"1 secret has expired, …" for the loaded vault, or "".</summary>
+    public string ExpirySummary => SecretExpiry.Summary(Secrets.Select(ExpiryOf));
 
     public const int MaxMetadataColumns = 3;
 

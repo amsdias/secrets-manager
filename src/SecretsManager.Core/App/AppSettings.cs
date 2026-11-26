@@ -4,14 +4,15 @@ namespace SecretsManager.Core.App;
 
 /// <summary>
 /// App preferences (never secrets). AutoLockMinutes: 0 turns auto-lock off. Theme: one of <see cref="AppThemes.All"/>.
-/// LastVault: reselected at startup.
+/// LastVault: reselected at startup. CheckForUpdates: ask GitHub for a newer release at startup.
 /// </summary>
 public sealed record AppSettings(
     int AutoLockMinutes = 10,
     string Theme = AppThemes.System,
     int ClipboardClearSeconds = 30,
     bool MinimizeToTray = false,
-    string? LastVault = null);
+    string? LastVault = null,
+    bool CheckForUpdates = true);
 
 public static class AppThemes
 {

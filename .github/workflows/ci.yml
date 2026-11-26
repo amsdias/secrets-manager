@@ -59,6 +59,11 @@ jobs:
           Copy-Item installer/bin/Release/PowerShellSecrets.msi "dist/PowerShellSecrets-$env:VERSION-x64.msi"
           Copy-Item publish/*.exe dist/
 
+      # Installs the MSI on the clean runner, checks the shortcut, PATH and "secrets get/list", then uninstalls it.
+      - name: Installer test
+        shell: pwsh
+        run: ./tests/Test-Installer.ps1 -Msi "dist/PowerShellSecrets-$env:VERSION-x64.msi"
+
       - name: Upload build
         uses: actions/upload-artifact@v7
         with:

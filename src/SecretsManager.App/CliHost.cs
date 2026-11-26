@@ -4,10 +4,10 @@ using SecretsManager.Core;
 
 namespace SecretsManager.App;
 
-/// <summary>"SecretsManager.exe get …": runs SecretsCli without any window.</summary>
+/// <summary>"SecretsManager.exe get|list …": runs SecretsCli without any window.</summary>
 static class CliHost
 {
-    public static bool IsCliCommand(string[] args) => args.Length > 0 && args[0] is "get" or "help" or "--help" or "-h" or "/?";
+    public static bool IsCliCommand(string[] args) => args.Length > 0 && args[0] is "get" or "list" or "help" or "--help" or "-h" or "/?";
 
     public static async Task<int> RunAsync(string[] args)
     {

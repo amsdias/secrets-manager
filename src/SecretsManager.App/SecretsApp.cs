@@ -233,7 +233,7 @@ sealed class SecretsApp : Component
             ? TextBlock(empty).TextWrapping().TextAlignment(TextAlignment.Center).Opacity(0.7).HAlign(HorizontalAlignment.Center).VAlign(VerticalAlignment.Center).MaxWidth(420).AutomationId("EmptyText")
             : ListView<SecretEntry>(visible, x => x.Name, (x, index) =>
                     Row(
-                        TextBlock(x.Name).AutomationName(x.Name),
+                        NameCell(x, s.ExpiryOf(x)),
                         TextBlock(x.Kind.ToString()).Opacity(0.8),
                         metaColumns.Select(k => (Element)TextBlock(AppState.MetadataValue(x, k)).Opacity(0.8).Margin(0, 0, 8, 0)),
                         TextBlock(AppState.OtherMetadataText(x, metaColumns)).Opacity(0.8)
@@ -253,6 +253,15 @@ sealed class SecretsApp : Component
             columnHeader.Grid(row: 2),
             list.Grid(row: 3));
     }
+
+    /// <summary>The name, plus a warning when its "expires" metadata date has passed or is near.</summary>
+    static Element NameCell(SecretEntry x, SecretExpiry expiry) => expiry.Warning is not { } warning
+        ? TextBlock(x.Name).AutomationName(x.Name)
+        : HStack(6,
+            TextBlock(x.Name).AutomationName(x.Name).VAlign(VerticalAlignment.Center),
+            IconGlyph(WarningGlyph, 12).Foreground(expiry.State == ExpiryState.Expired ? Theme.SystemCritical : Theme.SystemCaution).VAlign(VerticalAlignment.Center),
+            Caption(warning).Foreground(expiry.State == ExpiryState.Expired ? Theme.SystemCritical : Theme.SystemCaution).VAlign(VerticalAlignment.Center).AutomationId("ExpiryText")
+        ).ToolTip($"Expiry date (metadata): {expiry.Date:yyyy-MM-dd}");
 
     /// <summary>Fire-and-forget for UI handlers; AppStore methods handle and surface their own errors.</summary>
     static void Fire(Task task) { }
@@ -275,9 +284,18 @@ sealed class SecretsApp : Component
     {
         return Border(
             Grid(
-                columns: [GridSize.Star(), GridSize.Auto, GridSize.Auto],
+                columns: [GridSize.Star(), GridSize.Auto, GridSize.Auto, GridSize.Auto, GridSize.Auto],
                 rows: [GridSize.Auto],
                 TextBlock(s.Status).TextTrimming(TextTrimming.CharacterEllipsis).VAlign(VerticalAlignment.Center).AutomationId("StatusText"),
+                s.ExpirySummary is { Length: > 0 } expiring
+                    ? Caption(expiring).Foreground(Theme.SystemCaution).Margin(12, 0, 0, 0).VAlign(VerticalAlignment.Center)
+                        .ToolTip("From the secrets' \"expires\" metadata").AutomationId("ExpirySummary").Grid(row: 0, column: 4)
+                    : null,
+                s.UpdateAvailable is { } update
+                    ? HyperlinkButton($"Version {update.Version.ToString(3)} is available", update.Url)
+                        .ToolTip("Opens the release page on GitHub").Padding(6, 2, 6, 2).Margin(12, 0, 0, 0).VAlign(VerticalAlignment.Center)
+                        .AutomationId("UpdateLink").Grid(row: 0, column: 3)
+                    : null,
                 s.ClipboardSecondsLeft is { } left
                     ? TextBlock($"Clipboard clears in {left}s").Foreground(Theme.AccentText).Margin(12, 0, 12, 0).VAlign(VerticalAlignment.Center).AutomationId("ClipboardText").Grid(row: 0, column: 1)
                     : null,
@@ -287,7 +305,7 @@ sealed class SecretsApp : Component
 
     const string IconFont = "Segoe Fluent Icons";
     static string Glyph(int codePoint) => ((char)codePoint).ToString();
-    static readonly string ClosedPadlock = Glyph(0xE72E), OpenPadlock = Glyph(0xE785), Cog = Glyph(0xE713);
+    static readonly string ClosedPadlock = Glyph(0xE72E), OpenPadlock = Glyph(0xE785), Cog = Glyph(0xE713), WarningGlyph = Glyph(0xE7BA);
 
     /// <summary>
     /// An icon-font glyph as text (TextBlock takes a themed Foreground; IconElement doesn't). Tight line bounds drop the
@@ -404,6 +422,8 @@ sealed class SecretsApp : Component
                 .Header("Clear copied values from the clipboard").AutomationId("ClipboardCombo").HAlign(HorizontalAlignment.Stretch),
             CheckBox(st.MinimizeToTray, v => Set(x => x with { MinimizeToTray = v }), "Minimize to the notification area (tray icon)")
                 .AutomationId("TrayCheck"),
+            CheckBox(st.CheckForUpdates, v => Set(x => x with { CheckForUpdates = v }), "Check GitHub for a new version at startup")
+                .AutomationId("UpdateCheck"),
             Caption(JsonFileSettingsStore.DefaultPath).FontFamily("Consolas").Opacity(0.6),
             Caption($"PowerShell Secrets {typeof(AppServices).Assembly.GetName().Version?.ToString(3)}").Opacity(0.6).AutomationId("VersionText"),
             Buttons(Button("Close", Store.CloseSettings).AccentButton().AutomationId("SettingsCloseButton"))
@@ -458,7 +478,7 @@ sealed class SecretsApp : Component
             ComboBox(kinds.Select(k => k.ToString()).ToArray(), kinds.ToList().IndexOf(e.Kind), i => Edit(x => x with { Kind = kinds[i] }))
                 .Header("Type").AutomationId("TypeCombo").HAlign(HorizontalAlignment.Stretch),
             valueEditor,
-            TextBox(e.MetadataText, v => Edit(x => x with { MetadataText = v }), header: "Metadata (optional, key=value per line, not encrypted)")
+            TextBox(e.MetadataText, v => Edit(x => x with { MetadataText = v }), header: "Metadata (optional, key=value per line, not encrypted; expires=2027-01-31 warns before it expires)")
                 .AcceptsReturn().MinHeight(70).AutomationId("MetadataBox"),
             ErrorText(e.Error),
             Buttons(

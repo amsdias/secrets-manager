@@ -1,7 +1,7 @@
 using System.Diagnostics;
 
 // Relays "get <name> …" / "help" to SecretsManager.exe (next to this exe, or SECRETSMANAGER_APP) and returns its exit code.
-if (args.Length == 0 || args[0] is not ("get" or "help" or "--help" or "-h" or "/?"))
+if (args.Length == 0 || args[0] is not ("get" or "list" or "help" or "--help" or "-h" or "/?"))
     args = ["help"];
 
 var app = Environment.GetEnvironmentVariable("SECRETSMANAGER_APP") is { Length: > 0 } overridePath

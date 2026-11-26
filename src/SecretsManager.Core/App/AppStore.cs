@@ -16,7 +16,11 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
     readonly TimeProvider _time = time ?? TimeProvider.System;
     readonly Lock _lock = new();
     readonly IAppSettingsStore _settings = settings ?? new InMemorySettingsStore();
-    AppState _state = new() { Settings = Sanitize(settings?.Load() ?? new AppSettings()) };
+    AppState _state = new()
+    {
+        Settings = Sanitize(settings?.Load() ?? new AppSettings()),
+        Today = DateOnly.FromDateTime((time ?? TimeProvider.System).GetLocalNow().DateTime),
+    };
     TaskCompletionSource<PromptResult?>? _pendingPrompt;
     int _promptId, _loadVersion;
     CancellationTokenSource? _clipboardCts;
@@ -33,6 +37,10 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
     public string? WindowsVaultModulePath { get; init; }
     /// <summary>PBKDF2 work factor for new export files (tests lower it).</summary>
     public int ExportIterations { get; init; } = SecretsExport.DefaultIterations;
+    /// <summary>Finds newer releases; null turns the check off (tests, the UI test, builds without a version).</summary>
+    public IUpdateChecker? Updates { get; init; }
+    /// <summary>This build's version, compared with the latest release.</summary>
+    public Version? CurrentVersion { get; init; }
     public AppState State => _state;
     public event Action? Changed;
 
@@ -125,6 +133,7 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
         var hello = storePassword is not null && await storePassword.IsAvailableAsync();
         Update(s => s with { SecretStoreAvailable = available, HelloAvailable = hello, HelloEnabled = storePassword?.IsEnabled == true });
         if (available && secrets.IsSecretStoreInitialized) await ProbeStoreAsync();
+        _ = CheckForUpdatesAsync(); // in the background: never delays startup, never reports failures
         await ReloadVaultsAsync(null);
         if (State.Vaults.IsEmpty && available &&
             await ConfirmAsync("Welcome", "No secret vaults are registered yet. Register a local SecretStore vault now?", "Register"))
@@ -577,8 +586,28 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
 
     void SaveSettings(Func<AppSettings, AppSettings> change)
     {
+        var wasChecking = State.Settings.CheckForUpdates;
         Update(s => s with { Settings = Sanitize(change(s.Settings)) });
         _settings.Save(State.Settings);
+        if (State.Settings.CheckForUpdates && !wasChecking) _ = CheckForUpdatesAsync();
+        if (!State.Settings.CheckForUpdates) Update(s => s with { UpdateAvailable = null });
+    }
+
+    // ------------------------------------------------------------------ update check
+
+    /// <summary>
+    /// Asks <see cref="Updates"/> for the latest release once; sets <see cref="AppState.UpdateAvailable"/> when it is newer.
+    /// Failures (offline, rate limit) are silent: a missing notice costs nothing, a startup error would.
+    /// </summary>
+    public async Task CheckForUpdatesAsync()
+    {
+        if (Updates is null || CurrentVersion is null || !State.Settings.CheckForUpdates) return;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        UpdateInfo? latest;
+        try { latest = await Updates.GetLatestAsync(timeout.Token); }
+        catch (OperationCanceledException) { return; }
+        if (latest is not null && GitHubUpdateChecker.IsNewer(latest.Version, CurrentVersion) && State.Settings.CheckForUpdates)
+            Update(s => s with { UpdateAvailable = latest });
     }
 
     /// <summary>For incidental settings (the last vault): a failed save must not interrupt the user.</summary>
@@ -652,6 +681,8 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
         while (true)
         {
             await Task.Delay(TimeSpan.FromSeconds(5), _time);
+            var today = DateOnly.FromDateTime(_time.GetLocalNow().DateTime);
+            if (today != State.Today) Update(s => s with { Today = today }); // expiry warnings move on at midnight
             var minutes = State.AutoLockMinutes;
             if (minutes <= 0 || _lockedSinceActivity) continue;
             var idle = _time.GetUtcNow() - new DateTimeOffset(Volatile.Read(ref _lastActivityTicks), TimeSpan.Zero);

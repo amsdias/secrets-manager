@@ -79,6 +79,42 @@ $staging = $null
 if (-not $Source) {
     $staging = Join-Path ([IO.Path]::GetTempPath()) "SecretsManager-publish-$([guid]::NewGuid().ToString('N'))"
     $selfContained = if ($FrameworkDependent) { 'false' } else { 'true' }
+    # The newest release tag (v1.2.3 -> 1.2.3), so the app shows it and compares it with GitHub's latest release.
+    $tag = git -C $repo describe --tags --abbrev=0 --match 'v[0-9]*' 2>$null
+    $version = if ($LASTEXITCODE -eq 0 -and $tag -match '^v(\d+\.\d+\.\d+)
+    dotnet publish (Join-Path $repo 'src\SecretsManager.App') -c Release -p:Platform=x64 -r win-x64 --self-contained $selfContained `
+        -p:PublishSingleFile=true -p:DebugType=embedded -p:Version=$version -o $staging
+    if ($LASTEXITCODE) { throw "dotnet publish failed (exit $LASTEXITCODE)" }
+    # The console front end for "get" (PowerShell doesn't capture a GUI exe's output); NativeAOT, set in its csproj.
+    dotnet publish (Join-Path $repo 'src\SecretsManager.Cli') -c Release -r win-x64 -p:Version=$version -o $staging
+    if ($LASTEXITCODE) { throw "dotnet publish of the CLI failed (exit $LASTEXITCODE)" }
+    $Source = $staging
+}
+try {
+    if (-not (Test-Path (Join-Path $Source $exeName))) { throw "$Source doesn't contain $exeName" }
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    robocopy $Source $Destination /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw "Copying to $Destination failed (robocopy exit $LASTEXITCODE)" }
+}
+finally {
+    if ($staging) { Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+$exe = Join-Path $Destination $exeName
+$shell = New-Object -ComObject WScript.Shell
+foreach ($link in @($startMenuLink) + @(if ($Desktop) { $desktopLink })) {
+    $shortcut = $shell.CreateShortcut($link)
+    $shortcut.TargetPath = $exe
+    $shortcut.WorkingDirectory = $Destination
+    $shortcut.IconLocation = "$exe,0"
+    $shortcut.Description = 'Manage PowerShell SecretManagement vaults and secrets'
+    $shortcut.Save()
+    "Shortcut: $link"
+}
+Set-UserPathEntry $Destination $true
+"Installed to $Destination"
+exit 0
+) { $Matches[1] } else { '0.0.0' }
     dotnet publish (Join-Path $repo 'src\SecretsManager.App') -c Release -p:Platform=x64 -r win-x64 --self-contained $selfContained `
         -p:PublishSingleFile=true -p:DebugType=embedded -o $staging
     if ($LASTEXITCODE) { throw "dotnet publish failed (exit $LASTEXITCODE)" }

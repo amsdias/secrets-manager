@@ -18,6 +18,7 @@ dotnet test --project tests/SecretsManager.Core.Tests        # MTP runner (globa
 dotnet test --project tests/SecretsManager.Core.Tests -- --filter-method "*Locked*"   # subset
 dotnet test --project tests/SecretsManager.Core.Tests -- --explicit only              # real SecretStore round trip
 pwsh -NoProfile -File tests/Invoke-AppUiTest.ps1 [-ExePath publish\SecretsManager.exe]  # UI Automation E2E (build first)
+pwsh -File tests/Test-Installer.ps1 -Msi <msi>               # CI only: installs, uses and UNINSTALLS the MSI (-Force to run locally)
 dotnet publish src/SecretsManager.App -c Release -p:Platform=x64 -r win-x64 --self-contained -p:PublishSingleFile=true -p:DebugType=embedded -o publish  # compressed
 dotnet publish src/SecretsManager.Cli -c Release -r win-x64 -o publish   # secrets.exe, NativeAOT (needs the MSVC linker)
 pwsh -NoProfile -File tools/Install-SecretsManager.ps1       # both publishes + install to %LOCALAPPDATA%\Programs\SecretsManager + Start menu shortcut
@@ -73,6 +74,14 @@ run the UI test with `-ExePath` on the installed exe. Verifying only the Debug b
   marker file.
 
 ## Pitfalls already hit (do not reintroduce)
+
+- **WinUI's TextBox separates lines with `\r` alone.** Anything that splits user text into lines must split on `\r\n`, `\r` and `\n`
+  (`KeyValueText.Parse` once split on `\n` only, so multi-line metadata typed in the app became one key).
+- **`secrets get <name>` without `--vault`** searches SecretStore last, which asks for Windows Hello. Tests must pass `--vault`;
+  a test without it once sat on a Hello prompt on the user's screen.
+- **The relay (`src/SecretsManager.Cli/Program.cs`) forwards only the commands it knows**: a new CLI command must be added there,
+  in `CliHost.IsCliCommand` and in `SecretsCli`.
+- **Update check**: dev builds are version 0.0.0 (csproj default) and skip it; the UI test passes `--no-update-check`.
 
 - **PowerShell scripts:** `param()` must be the first statement, so nothing may be prepended to a script.
   `$ErrorActionPreference='Stop'` is set through `InitialSessionState`, and modules autoload.

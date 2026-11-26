@@ -107,7 +107,7 @@ try {
     # that export/import use instead of a file dialog.
     $settingsFile = Join-Path $tmp "sg-settings-$suffix.json"
     $exportFile = Join-Path $tmp "sg-export-$suffix.smsecrets"
-    foreach ($a in '--settings-file', $settingsFile, '--ui-test-file', $exportFile) { $psi.ArgumentList.Add($a) }
+    foreach ($a in '--settings-file', $settingsFile, '--ui-test-file', $exportFile, '--no-update-check') { $psi.ArgumentList.Add($a) }
     $psi.UseShellExecute = $false
     $psi.WorkingDirectory = Split-Path $exe
     $psi.Environment.Clear()
@@ -129,7 +129,7 @@ try {
     $nameBox = Wait-For { ById 'NameBox' } 'editor'
     Set-Val $nameBox 'uitest1'
     Invoke-El (ById 'GenerateButton')
-    Set-Val (ById 'MetadataBox') 'env=ui'
+    Set-Val (ById 'MetadataBox') "env=ui`r`nexpires=2020-01-31"
     Invoke-El (ById 'SaveButton')
     [void](Wait-For { -not (ById 'NameBox') } 'editor to close')
     $info = Wait-For { Get-Info $plain uitest1 } 'uitest1 in the vault'
@@ -138,6 +138,10 @@ try {
     Pass 'new SecureString secret saved with generated password and metadata'
     [void](Wait-For { (ByName 'env') -and (ByName 'ui') } 'metadata column "env" with value "ui"')
     Pass 'metadata key shown as its own column'
+    $expiry = Wait-For { ById 'ExpiryText' } 'expiry warning next to the name'
+    if ($expiry.Current.Name -notmatch '^expired \d+ days ago$') { throw "expiry warning reads '$($expiry.Current.Name)'" }
+    if ((ById 'ExpirySummary').Current.Name -notmatch '^1 secret has expired') { throw 'the status bar does not count the expired secret' }
+    Pass 'an expired secret is flagged in the list and counted in the status bar'
 
     # --- taken name: editor stays open with the vault's error
     Invoke-El (ById 'NewSecretButton')
@@ -255,10 +259,14 @@ try {
     $env:SECRETSMANAGER_APP = (Resolve-Path $exe).Path
     $cliOut = & $cli get devkey --vault $dev
     if ($LASTEXITCODE -ne 0 -or $cliOut -ne 'dev-value-123') { throw "get returned '$cliOut' (exit $LASTEXITCODE)" }
-    $null = & $cli get "missing-$suffix" 2>$null
+    # --vault: without it, a miss goes on to search the real SecretStore, which asks for Windows Hello.
+    $null = & $cli get "missing-$suffix" --vault $dev 2>$null
     if ($LASTEXITCODE -ne 1) { throw "get of a missing secret exited $LASTEXITCODE, expected 1" }
+    $listed = (& $cli list --vault $dev --json) | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or $listed.name -notcontains 'devkey' -or ($listed | ConvertTo-Json -Compress) -match 'dev-value-123') {
+        throw "list returned '$($listed | ConvertTo-Json -Compress)' (exit $LASTEXITCODE)" }
     Remove-Item Env:SECRETSMANAGER_APP
-    Pass 'secrets get prints a dev key without asking; exit 1 when missing'
+    Pass 'secrets get prints a dev key without asking; exit 1 when missing; list shows names, not values'
 
     # --- Remove… on a Windows-account vault: the options are radio buttons; "delete its secrets too"
     Select-Row $dev 'VaultList'

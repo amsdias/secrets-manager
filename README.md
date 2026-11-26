@@ -61,6 +61,11 @@ dotnet publish src/SecretsManager.App -c Release -p:Platform=x64 -r win-x64 --se
 - **Lock**: **Lock** (Ctrl+L) closes open secrets, clears a copied value from the clipboard and locks SecretStore. The app also locks
   itself after a chosen time without keyboard or mouse activity (status bar; default 10 minutes, saved in
   `%LOCALAPPDATA%\SecretsManager\settings.json`).
+- **Expiry reminders**: give a secret an `expires=2027-01-31` metadata entry (also `expiry` or `expiration`; a date or an ISO date
+  and time). The list flags it from 14 days before ("expires in 5 days", then "expired 2 days ago"), the status bar counts them, and
+  `secrets get` still prints the value but warns on stderr.
+- **Update check**: at startup the app asks GitHub for the latest release and shows a link in the status bar when there is a newer one.
+  It's one anonymous request to api.github.com, with nothing about you or your secrets; turn it off in Settings.
 - **All secret types**: String, SecureString, PSCredential, Hashtable, ByteArray (load from / save to file), plus metadata.
 - **Password generator** (24 random characters, ambiguous characters left out).
 - **SecretStore settings**: authentication, password timeout, interaction, change password, reset (asks twice, and you must type `RESET`).
@@ -93,6 +98,8 @@ terminal after installing):
 secrets get api-key                     # prints the value; exit 0 found, 1 not found, 2 cancelled/locked, 3 error
 secrets get db-login --field username   # PSCredential: password by default, or the user name
 secrets get api-key --vault Dev         # without --vault, password-free vaults are searched before SecretStore
+secrets list                            # names, vaults, types and metadata (never values); skips a locked SecretStore
+secrets list api --vault Prod --json    # filter by name; --vault on SecretStore asks for Windows Hello; JSON for scripts
 ```
 
 Use a value inside the command instead of printing it, so it doesn't end up in logs or in a chat transcript:
@@ -106,6 +113,7 @@ Claude Code doesn't discover `secrets` by itself. Add this to `~/.claude/CLAUDE.
 ## Secrets (API keys, tokens, passwords)
 
 Read them with the `secrets` command (PowerShell Secrets) instead of asking me to paste them or creating files:
+- `secrets list` shows the names (never values); find the right name there before asking me.
 - PowerShell: `$env:API_KEY = secrets get <name>; <command>`, bash: `API_KEY="$(secrets get <name>)" <command>`.
 - Never print, echo or log a value, and never write one to a file or commit it. Pass it straight to the command that needs it.
 - Exit codes: 1 not found (ask me for the name), 2 I declined Windows Hello or the store is locked (don't retry; ask), 3 error.

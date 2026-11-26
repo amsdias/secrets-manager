@@ -12,7 +12,8 @@ public static class KeyValueText
         if (string.IsNullOrWhiteSpace(text)) return result;
 
         var lineNo = 0;
-        foreach (var raw in text.Split('\n'))
+        // WinUI's TextBox separates lines with "\r" alone; files and tests use "\r\n" or "\n".
+        foreach (var raw in text.Split(["\r\n", "\r", "\n"], StringSplitOptions.None))
         {
             lineNo++;
             var line = raw.Trim();
