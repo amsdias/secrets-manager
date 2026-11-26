@@ -12,9 +12,9 @@ jobs:
   build-and-test:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '11.0.x'
 
@@ -46,7 +46,7 @@ jobs:
           if (($files.Name | Sort-Object) -join ',' -ne 'SecretsManager.Cli.exe,SecretsManager.exe') { throw "unexpected publish output: $($files.Name -join ', ')" }
 
       - name: Upload build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: SecretsManager-win-x64
           path: publish/*.exe
