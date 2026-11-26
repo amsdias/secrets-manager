@@ -136,6 +136,14 @@ Read them with the `secrets` command (PowerShell Secrets) instead of asking me t
 - Prefer SecretStore `Interaction = None` (the app creates stores that way). With `Prompt`, SecretStore can't prompt inside the app, so
   the app asks for the password itself.
 
+## License
+
+Copyright (C) 2026 Angelo Dias. PowerShell Secrets is free software under the
+[GNU Affero General Public License v3.0](LICENSE) or later, with an additional permission (in [NOTICE](NOTICE)) to combine it
+with the Windows App SDK, .NET, the PowerShell SDK and Reactor. The AGPL means that anyone who distributes a modified version,
+or lets people use one over a network, must offer those users its source under the same license. Bundled third-party modules
+keep their own MIT licenses ([third_party](third_party/README.md)).
+
 ## Tests
 
 ```powershell

@@ -25,6 +25,8 @@
       <Component Id="App" Guid="3c9a6e21-8f4b-4d7a-b5e2-91d0c6f3a8b4">
         <File Id="AppExe" Source="$(PublishDir)SecretsManager.exe" />
         <File Id="CliExe" Source="$(PublishDir)secrets.exe" />
+        <File Id="LicenseFile" Source="$(RepoRoot)LICENSE" Name="LICENSE.txt" />
+        <File Id="NoticeFile" Source="$(RepoRoot)NOTICE" Name="NOTICE.txt" />
         <!-- "secrets get name" in any new terminal. Windows joins the user and system PATH (unlike PSModulePath), and
              uninstalling removes only this entry. -->
         <Environment Id="UserPath" Name="PATH" Value="[INSTALLFOLDER]" Part="last" Action="set" System="no" Permanent="no" />

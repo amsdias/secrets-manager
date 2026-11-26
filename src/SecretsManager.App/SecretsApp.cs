@@ -426,6 +426,12 @@ sealed class SecretsApp : Component
                 .AutomationId("UpdateCheck"),
             Caption(JsonFileSettingsStore.DefaultPath).FontFamily("Consolas").Opacity(0.6),
             Caption($"PowerShell Secrets {typeof(AppServices).Assembly.GetName().Version?.ToString(3)}").Opacity(0.6).AutomationId("VersionText"),
+            // AGPL section 5(d): interactive programs show the license, the lack of warranty and where to get the source.
+            Caption("Copyright (C) 2026 Angelo Dias. Free software under the GNU AGPL v3 or later, with ABSOLUTELY NO WARRANTY.")
+                .TextWrapping().Opacity(0.6).AutomationId("LicenseText"),
+            HStack(4,
+                HyperlinkButton("Source code", new Uri("https://github.com/amsdias/secrets-manager")).Padding(4, 0, 4, 0).AutomationId("SourceLink"),
+                HyperlinkButton("License", new Uri("https://www.gnu.org/licenses/agpl-3.0.html")).Padding(4, 0, 4, 0).AutomationId("LicenseLink")),
             Buttons(Button("Close", Store.CloseSettings).AccentButton().AutomationId("SettingsCloseButton"))
         ).MinWidth(480).AutomationId("SettingsPanel");
     }

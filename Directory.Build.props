@@ -3,5 +3,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
+    <Authors>Angelo Dias</Authors>
+    <Copyright>Copyright (C) 2026 Angelo Dias. GNU AGPL v3 or later.</Copyright>
   </PropertyGroup>
 </Project>

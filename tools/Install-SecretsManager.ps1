@@ -95,6 +95,8 @@ try {
     New-Item -ItemType Directory -Force -Path $Destination | Out-Null
     robocopy $Source $Destination /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "Copying to $Destination failed (robocopy exit $LASTEXITCODE)" }
+    Copy-Item (Join-Path $repo 'LICENSE') (Join-Path $Destination 'LICENSE.txt')
+    Copy-Item (Join-Path $repo 'NOTICE') (Join-Path $Destination 'NOTICE.txt')
 }
 finally {
     if ($staging) { Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue }
