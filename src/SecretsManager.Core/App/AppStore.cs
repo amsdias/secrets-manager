@@ -193,7 +193,7 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
         if (State.CurrentVault is not { } vault) return;
         if (!State.CanUnlock)
         {
-            SetStatus(State.IsStoreMissing ? "The SecretStore hasn't been created yet." : "This SecretStore doesn't use a password, so there is nothing to unlock.");
+            SetStatus(State.IsStoreMissing ? "The SecretStore hasn't been created yet." : $"'{vault.Name}' isn't locked.");
             return;
         }
         var password = vault.IsSecretStore ? await TryHelloPassword() : null;
@@ -216,15 +216,40 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
         SetStatus($"'{name}' is now the default vault.");
     });
 
+    /// <summary>
+    /// Removes the vault from SecretManagement's list (Unregister-SecretVault). Its secrets stay where they are, so adding a
+    /// vault with the same name and type shows them again. Only a Windows-account vault offers to delete its secrets too.
+    /// </summary>
     public Task UnregisterSelectedVaultAsync() => Run(async () =>
     {
-        if (State.SelectedVault is not { } name) return;
-        if (!await ConfirmAsync("Unregister vault",
-                $"Unregister '{name}'?\n\nThe secrets themselves are not deleted; registering the vault again restores access.", "Unregister"))
-            return;
+        if (State.CurrentVault is not { } vault) return;
+        var name = vault.Name;
+        var deleteSecrets = false;
+        if (vault.IsWindowsVault)
+        {
+            var r = await AskAsync(new PromptRequest(PromptKind.Choice, "Remove vault", $"Remove '{name}' from the list?")
+            {
+                Choices = [$"Keep its secrets (adding a Windows-account vault named '{name}' shows them again)", "Delete its secrets too (cannot be undone)"],
+                PrimaryText = "Remove",
+            });
+            if (r is null || r.ChoiceIndex < 0) return;
+            deleteSecrets = r.ChoiceIndex == 1;
+        }
+        else
+        {
+            var where = vault.IsSecretStore
+                ? "They stay in the SecretStore, which every SecretStore vault shares."
+                : $"They stay in the vault's own storage ({vault.ModuleName}).";
+            if (!await ConfirmAsync("Remove vault",
+                    $"Remove '{name}' from the list?\n\nIts secrets are not deleted. {where} Adding a vault with the same name and type shows them again.", "Remove"))
+                return;
+        }
+        if (deleteSecrets)
+            foreach (var entry in await secrets.GetSecretsAsync(name))
+                await secrets.RemoveSecretAsync(name, entry.Name);
         await secrets.UnregisterVaultAsync(name);
         await ReloadVaultsAsync(null);
-        SetStatus($"Unregistered '{name}'.");
+        SetStatus(deleteSecrets ? $"Removed '{name}' and deleted its secrets." : $"Removed '{name}' from the list; its secrets are kept.");
     });
 
     public void OpenVaultForm() => Update(s =>
@@ -273,7 +298,7 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
                 if (module.Equals(VaultInfo.SecretStoreModule, StringComparison.OrdinalIgnoreCase) && !secrets.IsSecretStoreInitialized)
                     await InitializeStoreFlowAsync();
                 await ReloadVaultsAsync(name);
-                SetStatus($"Registered vault '{name}'.");
+                SetStatus($"Added vault '{name}'.");
             });
         }
         catch (Exception ex) { UpdateVaultForm(f => f with { Error = ex.Message }); }
@@ -563,21 +588,41 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
         Theme = AppThemes.Normalize(s.Theme),
     };
 
-    public Task LockAsync() => LockAsync("Locked.");
+    public Task LockAsync() => LockAsync(null);
 
     /// <summary>
     /// Drops every decrypted value the app holds (viewer, editor, clipboard) and locks SecretStore, so the next access
     /// needs its password. Other vault types can't be locked from outside; their open values are still dropped.
     /// </summary>
-    Task LockAsync(string status) => Run(async () =>
+    /// <param name="reason">Set by auto-lock; null for the Lock button.</param>
+    Task LockAsync(string? reason) => Run(async () =>
     {
+        var closed = State.Viewer is not null || State.Editor is not null || State.ClipboardSecondsLeft is not null;
         Update(s => s with { Viewer = null, Editor = null });
         await ClearClipboardIfOursAsync();
-        var locked = await secrets.LockStoreAsync();
-        if (State.CurrentVault is { IsSecretStore: true } && !State.IsStoreMissing && State.StoreAuthentication != StoreAuthentication.None)
+        var hasPassword = await StoreHasPasswordAsync();
+        var locked = hasPassword && await secrets.LockStoreAsync();
+        if (hasPassword && State.CurrentVault is { IsSecretStore: true } && !State.IsStoreMissing)
             Update(s => s with { Secrets = [], SelectedSecret = null, IsVaultLocked = true });
-        SetStatus(locked ? status : status + " This SecretStore version can't be locked by the app; it locks itself after its password timeout.");
+
+        var unlockWith = storePassword is { IsEnabled: true } ? "Windows Hello" : "its password";
+        var message =
+            hasPassword && locked ? $"{reason ?? "Locked."} SecretStore asks for {unlockWith} next time."
+            : hasPassword ? $"{reason ?? "Locked."} This SecretStore version can't be locked by the app; it locks itself after its password timeout."
+            : closed ? $"{(reason is null ? "" : reason + " ")}Closed the open secret and cleared the clipboard. Nothing else to lock: none of your vaults uses a password."
+            : reason is null ? "Nothing to lock: none of your vaults uses a password." : null;
+        if (message is not null) SetStatus(message);
     });
+
+    /// <summary>Whether a SecretStore with a password is in use (only that can be locked).</summary>
+    async Task<bool> StoreHasPasswordAsync()
+    {
+        if (!State.Vaults.Any(v => v.IsSecretStore) || !secrets.IsSecretStoreInitialized) return false;
+        if (State.StoreAuthentication is { } known) return known == StoreAuthentication.Password;
+        try { return (await secrets.GetStoreConfigAsync()).Authentication == StoreAuthentication.Password; }
+        catch (VaultLockedException) { return true; } // locked means it has a password
+        catch (SecretsOperationException) { return false; }
+    }
 
     async Task AutoLockLoopAsync()
     {

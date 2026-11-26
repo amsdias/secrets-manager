@@ -163,10 +163,12 @@ sealed class SecretsApp : Component
                 columns: [GridSize.Star(), GridSize.Star()],
                 rows: [GridSize.Auto, GridSize.Auto, GridSize.Auto, GridSize.Auto, GridSize.Auto, GridSize.Auto],
                 SectionLabel("Vault", 0),
-                Cell(Button("Register…", Store.OpenVaultForm).AutomationId("RegisterVaultButton"), 1, 0),
-                Cell(Button("Unregister", () => _ = Store.UnregisterSelectedVaultAsync()).IsEnabled(vault is not null).AutomationId("UnregisterVaultButton"), 1, 1),
+                Cell(Button("Add vault…", Store.OpenVaultForm).ToolTip("Create a vault, or add an existing one back to the list").AutomationId("RegisterVaultButton"), 1, 0),
+                Cell(Button("Remove…", () => _ = Store.UnregisterSelectedVaultAsync()).IsEnabled(vault is not null)
+                    .ToolTip("Remove the vault from the list (its secrets are kept unless you choose to delete them)").AutomationId("UnregisterVaultButton"), 1, 1),
                 Cell(Button("Set default", () => _ = Store.SetDefaultVaultAsync()).IsEnabled(vault is { IsDefault: false }).AutomationId("DefaultVaultButton"), 2, 0),
-                Cell(Button("Unlock…", () => _ = Store.UnlockSelectedVaultAsync()).IsEnabled(s.CanUnlock).AutomationId("UnlockButton"), 2, 1),
+                Cell(Button("Unlock…", () => _ = Store.UnlockSelectedVaultAsync()).IsEnabled(s.CanUnlock)
+                    .ToolTip("Enter the password of a locked vault (only vaults with a password can be locked)").AutomationId("UnlockButton"), 2, 1),
                 Cell(Button("Import…", () => _ = ImportAsync()).IsEnabled(vault is not null && !s.IsStoreMissing)
                     .ToolTip("Import secrets from an encrypted export file into this vault").AutomationId("ImportButton"), 3, 0),
                 Cell(Button("Export…", () => _ = ExportAsync()).IsEnabled(vault is not null && !s.IsStoreMissing && !s.Secrets.IsEmpty)
@@ -274,7 +276,7 @@ sealed class SecretsApp : Component
                 Button("Settings", Store.OpenSettings).ToolTip("Theme, auto-lock, clipboard and tray (Ctrl+,)")
                     .AutomationId("SettingsButton").Margin(0, 0, 8, 0).Grid(row: 0, column: 3),
                 Button("Lock", () => _ = Store.LockAsync())
-                    .ToolTip("Lock now: close open secrets, clear the clipboard and lock SecretStore (Ctrl+L)").AutomationId("LockButton").Grid(row: 0, column: 4))
+                    .ToolTip("Lock now (Ctrl+L): close the open secret, clear a copied value, and lock a SecretStore that has a password").AutomationId("LockButton").Grid(row: 0, column: 4))
         ).Background(Theme.LayerFill).Padding(14, 4, 14, 4);
     }
 
@@ -463,16 +465,19 @@ sealed class SecretsApp : Component
         string[] kindLabels = ["SecretStore", "Windows account (never asks)", "Other extension module"];
         var about = f.Kind switch
         {
-            VaultKind.SecretStore => s.SecretStoreAvailable
-                ? "Encrypted locally, with a password (which Windows Hello can unlock) or protected only by your Windows account. " +
-                  "One SecretStore per user: every SecretStore vault shares it. Good for production keys."
-                : "Microsoft.PowerShell.SecretStore is not installed.",
+            VaultKind.SecretStore => !s.SecretStoreAvailable ? "Microsoft.PowerShell.SecretStore is not installed."
+                : (s.Vaults.FirstOrDefault(v => v.IsSecretStore) is { } existing
+                    ? $"'{existing.Name}' already uses the SecretStore. There is one SecretStore per Windows user, so another " +
+                      "SecretStore vault shows the same secrets. For a separate set of keys, choose Windows account."
+                    : "Encrypted locally, with a password (which Windows Hello can unlock) or protected only by your Windows account. " +
+                      "There is one SecretStore per Windows user. Good for production keys."),
             VaultKind.WindowsAccount => "Encrypted for your Windows account, with no password: the app, scripts and " +
                 "'SecretsManager.exe get' read it without asking. Good for development keys. Anything running as you can read it.",
             _ => "Any installed SecretManagement extension (e.g. Az.KeyVault, SecretManagement.KeePass), by name or path.",
         };
         return VStack(12,
-            Subtitle("Register vault"),
+            Subtitle("Add vault"),
+            Caption("Adding a vault with the name and type of one you removed shows its secrets again.").TextWrapping().Opacity(0.7),
             ComboBox(kindLabels, Array.IndexOf(kinds, f.Kind), i => { if (i >= 0) Edit(x => x with { Kind = kinds[i] }); })
                 .Header("Type").AutomationId("VaultKindCombo").HAlign(HorizontalAlignment.Stretch),
             Caption(about).TextWrapping().Opacity(0.7),
@@ -488,7 +493,7 @@ sealed class SecretsApp : Component
             CheckBox(f.MakeDefault, v => Edit(x => x with { MakeDefault = v }), "Make this the default vault").AutomationId("VaultDefaultCheck"),
             ErrorText(f.Error),
             Buttons(
-                Button(f.IsSaving ? "Registering…" : "Register", () => _ = Store.SaveVaultFormAsync()).AccentButton().IsEnabled(!f.IsSaving).AutomationId("VaultSaveButton"),
+                Button(f.IsSaving ? "Adding…" : "Add", () => _ = Store.SaveVaultFormAsync()).AccentButton().IsEnabled(!f.IsSaving).AutomationId("VaultSaveButton"),
                 Button("Cancel", Store.CloseVaultForm).AutomationId("VaultCancelButton"))
         ).MinWidth(480).AutomationId("VaultFormPanel");
     }

@@ -145,9 +145,11 @@ public sealed record AppState
     public bool IsBusy => BusyCount > 0;
     public VaultInfo? CurrentVault => Vaults.FirstOrDefault(v => v.Name == SelectedVault);
     public SecretEntry? CurrentSecret => Secrets.FirstOrDefault(s => s.Name == SelectedSecret);
-    /// <summary>Unlock makes no sense for a SecretStore without a password, or one that hasn't been created yet.</summary>
-    public bool CanUnlock => CurrentVault is { } v &&
-        !(v.IsSecretStore && (IsStoreMissing || StoreAuthentication == Core.StoreAuthentication.None));
+    /// <summary>
+    /// Unlock is offered only for a vault that is actually locked. Vaults without a password (Windows-account vaults,
+    /// a SecretStore without a password) never are; SecretManagement silently accepts any "unlock" password for them.
+    /// </summary>
+    public bool CanUnlock => CurrentVault is not null && IsVaultLocked && !IsStoreMissing;
 
     public bool HasPanel => Editor is not null || Viewer is not null || VaultForm is not null || StoreSettings is not null || IsSettingsOpen;
 
@@ -205,7 +207,7 @@ public sealed record AppState
     public string? EmptyMessage =>
         !HasLoaded ? "Loading…" :
         Vaults.IsEmpty ? (SecretStoreAvailable
-            ? "No vaults are registered yet. Click Register to create a SecretStore vault."
+            ? "No vaults yet. Click Add vault to create one."
             : "No vaults are registered and Microsoft.PowerShell.SecretStore is not installed.") :
         SelectedVault is null ? "Select a vault." :
         IsStoreMissing ? "The SecretStore for this vault hasn't been created yet. Click Store settings to create it." :

@@ -44,7 +44,9 @@ dotnet publish src/SecretsManager.App -c Release -p:Platform=x64 -r win-x64 --se
 
 ## Features
 
-- **Vaults**: list, register (any extension module, with vault parameters), unregister, set default, unlock.
+- **Vaults**: add (SecretStore, a Windows-account vault, or any extension module), remove from the list (secrets are kept, so adding
+  it again shows them; a Windows-account vault can also delete them), set default, unlock (only a vault that is locked). There is
+  one SecretStore per Windows user: every SecretStore vault shows the same secrets.
 - **Secrets**: search (name and metadata; `key=value` matches one metadata key), view (masked until revealed), copy, create, edit,
   rename, copy to another vault, delete. The three most used metadata keys get their own columns.
 - **Export / import**: save a whole vault to a password-encrypted `.smsecrets` file, and import it into any vault. On import you choose
@@ -69,7 +71,7 @@ In the secret list: **Enter** view, **F2** edit, **Del** delete, **Ctrl+C** copy
 
 Where a secret lives decides whether reading it asks for approval:
 
-| Vault type (Register…) | Reading it | Good for |
+| Vault type (Add vault…) | Reading it | Good for |
 | --- | --- | --- |
 | **Windows account** | never asks; encrypted for your Windows account (DPAPI), so anything running as you can read it | development keys |
 | **SecretStore with a password**, *Unlock with Windows Hello* on (Store settings) | asks for Windows Hello (PIN, face, fingerprint) every time, in the app and from the command line | production keys |

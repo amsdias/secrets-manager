@@ -242,6 +242,8 @@ try {
     if ((Wait-For { Get-Value $dev devkey } 'devkey via Get-Secret') -ne 'dev-value-123') { throw 'Get-Secret returned the wrong dev value' }
     if ((Get-Content $devFile -Raw) -match 'dev-value-123') { throw 'the Windows-account vault file contains plain text' }
     Pass 'Windows-account vault: created in the app, encrypted on disk, readable by Get-Secret'
+    if ((ById 'UnlockButton').Current.IsEnabled) { throw 'Unlock is enabled on a vault that has no password' }
+    Pass 'Unlock is disabled on a vault without a password'
     # SecretsManager.Cli.exe (console) relays to the exe under test: PowerShell doesn't capture a GUI exe's output.
     $env:SECRETSMANAGER_APP = (Resolve-Path $exe).Path
     $cliOut = & $cli get devkey --vault $dev
@@ -260,7 +262,7 @@ try {
 
     # --- Lock now: drops the copied value and reports it
     Invoke-El (ById 'LockButton')
-    [void](Wait-For { -not (ById 'ClipboardText') -and (ById 'StatusText').Current.Name -like 'Locked*' } 'lock to clear the clipboard countdown')
+    [void](Wait-For { -not (ById 'ClipboardText') -and (ById 'StatusText').Current.Name -match 'Locked|cleared the clipboard' } 'lock to clear the clipboard countdown')
     Pass 'Lock cleared the clipboard countdown'
 
     Save-Shot 'app-final'

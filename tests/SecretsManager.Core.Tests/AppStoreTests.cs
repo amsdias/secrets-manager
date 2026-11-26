@@ -268,11 +268,13 @@ public class AppStoreTests
         var prompts = new PromptScript(store, Password("pw"));
         await store.InitializeAsync();
         Assert.Equal(auth, store.State.StoreAuthentication);
-        Assert.Equal(canUnlock, store.State.CanUnlock);
+        Assert.False(store.State.CanUnlock);                   // unlocked (or no password): nothing to unlock
 
+        await store.LockAsync();
+        Assert.Equal(canUnlock, store.State.CanUnlock);        // only a store with a password locks
+        Assert.Contains(canUnlock ? "asks for its password" : "Nothing to lock", store.State.Status);
         await store.UnlockSelectedVaultAsync();
         Assert.Equal(canUnlock ? 1 : 0, prompts.Asked.Count);  // no password prompt when there is no password
-        if (!canUnlock) Assert.Contains("doesn't use a password", store.State.Status);
     }
 
     [Fact]
@@ -291,13 +293,44 @@ public class AppStoreTests
     }
 
     [Fact]
-    public async Task Unlock_stays_available_for_other_vault_types()
+    public async Task Unlock_is_offered_for_any_locked_vault_and_never_for_one_without_a_password()
     {
-        _svc.AddVault("other", password: "pw", isDefault: true);
+        _svc.AddVault("locked", password: "pw", isDefault: true);
+        _svc.AddVault("open", module: @"C:\m\SecretsManager.WindowsVault.psd1");
         var store = Store();
-        _ = new PromptScript(store, Password("pw"));
+        _ = new PromptScript(store, _ => null); // cancel the automatic unlock prompt
         await store.InitializeAsync();
         Assert.True(store.State.CanUnlock);
+        await store.SelectVaultAsync("open");
+        Assert.False(store.State.CanUnlock);
+        await store.UnlockSelectedVaultAsync();
+        Assert.Contains("isn't locked", store.State.Status);
+    }
+
+    [Fact]
+    public async Task Removing_a_vault_keeps_its_secrets_unless_a_Windows_account_vault_is_told_to_delete_them()
+    {
+        _svc.AddVault("store", isDefault: true, module: VaultInfo.SecretStoreModule).Secrets["s"] = (new TextSecret("x"), new());
+        _svc.IsSecretStoreInitialized = true;
+        _svc.StoreConfig = new(StoreAuthentication.None, 900, StoreInteraction.None);
+        var dev = _svc.AddVault("dev", module: @"C:\m\SecretsManager.WindowsVault.psd1");
+        dev.Secrets["d"] = (new TextSecret("y"), new());
+        var store = Store();
+        var prompts = new PromptScript(store);
+        await store.InitializeAsync();
+
+        prompts.Then(_ => Ok());
+        await store.UnregisterSelectedVaultAsync();
+        Assert.Contains("not deleted", prompts.Asked[^1].Message);
+        Assert.Contains("Unregister store", _svc.Calls);
+        Assert.DoesNotContain(_svc.Calls, c => c.StartsWith("Remove store/"));
+
+        await store.SelectVaultAsync("dev");
+        prompts.Then(_ => new PromptResult(ChoiceIndex: 1)); // delete its secrets too
+        await store.UnregisterSelectedVaultAsync();
+        Assert.Equal(PromptKind.Choice, prompts.Asked[^1].Kind);
+        Assert.Contains("Remove dev/d", _svc.Calls);
+        Assert.Contains("deleted its secrets", store.State.Status);
     }
 
     [Fact]
