@@ -8,12 +8,13 @@ if (CliHost.IsCliCommand(args)) Environment.Exit(CliHost.RunAsync(args).GetAwait
 
 string? Arg(string name) => args.SkipWhile(a => a != name).Skip(1).FirstOrDefault();
 
+var windowsVaultModule = BundledModules.EnsureInstalled(); // before the runspace exists: it reads PSModulePath
 using var host = new PowerShellHost();
 AppServices.Store = new AppStore(new SecretsService(host), new WinUiClipboard(),
     settings: new JsonFileSettingsStore(Arg("--settings-file") ?? JsonFileSettingsStore.DefaultPath),
     storePassword: new WindowsHelloPasswordProvider(WindowsHelloPasswordProvider.DefaultSealPath))
 {
-    WindowsVaultModulePath = WindowsVaultModule.EnsureInstalled(),
+    WindowsVaultModulePath = windowsVaultModule,
 };
 AppServices.UiTestFilePath = Arg("--ui-test-file");
 

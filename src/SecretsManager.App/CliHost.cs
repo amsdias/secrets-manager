@@ -16,6 +16,7 @@ static class CliHost
         var utf8 = new UTF8Encoding(false);
         using var stdout = new StreamWriter(Console.OpenStandardOutput(), utf8) { AutoFlush = true };
         using var stderr = new StreamWriter(Console.OpenStandardError(), utf8) { AutoFlush = true };
+        BundledModules.EnsureInstalled();
         using var host = new PowerShellHost();
         return await SecretsCli.RunAsync(args, new SecretsService(host),
             new WindowsHelloPasswordProvider(WindowsHelloPasswordProvider.DefaultSealPath), stdout, stderr);

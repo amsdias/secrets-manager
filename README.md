@@ -8,18 +8,20 @@ A native Windows desktop app for
 > Reactor is an **experimental preview** from Microsoft (pinned here to `0.1.0-preview.18`). Expect API changes when upgrading.
 > The earlier PowerShell/WPF version still works and lives in [`legacy/`](legacy/README.md).
 
-## Requirements
-
-- Windows 10 1809+ or Windows 11, x64 (ARM64 builds too)
-- .NET 11 SDK (to build)
-- The SecretManagement modules installed for **PowerShell 7**. The app hosts PowerShell in-process and finds modules in the standard
-  PowerShell 7 module paths:
-
-  ```powershell
-  Install-PSResource Microsoft.PowerShell.SecretManagement, Microsoft.PowerShell.SecretStore -Scope CurrentUser
-  ```
-
 ## Install
+
+Download `PowerShellSecrets-<version>-x64.msi` from [Releases](https://github.com/amsdias/secrets-manager/releases) and run it.
+It installs for your account only (no admin rights) into `%LOCALAPPDATA%\Programs\SecretsManager`, adds **PowerShell Secrets** to
+the Start menu, and can be removed from Settings > Apps. Uninstalling keeps your settings, vaults and secrets.
+
+Nothing else is needed: the app is self-contained (no .NET install) and ships Microsoft.PowerShell.SecretManagement and
+Microsoft.PowerShell.SecretStore (see [third_party](third_party/README.md)). If you have those modules installed, yours are used.
+To use `Get-Secret` directly in your own PowerShell you still need them installed there:
+`Install-PSResource Microsoft.PowerShell.SecretManagement, Microsoft.PowerShell.SecretStore -Scope CurrentUser`.
+
+The installer isn't code-signed yet, so Windows SmartScreen may warn about an unknown publisher ("More info" > "Run anyway").
+
+### From source
 
 ```powershell
 pwsh -File tools/Install-SecretsManager.ps1             # one-file build, install to %LOCALAPPDATA%\Programs\SecretsManager, Start menu shortcut
@@ -31,6 +33,11 @@ pwsh -File tools/Install-SecretsManager.ps1 -Uninstall  # remove the app and its
 Run it again to update (close the app first). No admin rights are needed. Nothing else needs installing: `SecretsManager.exe` is a
 self-contained, compressed single file (about 90 MB) that unpacks itself to `%TEMP%\.net\SecretsManager` the first time each
 version starts, and `SecretsManager.Cli.exe` is a small native exe.
+
+## Releases
+
+Pushing a tag `v1.2.3` makes CI build version 1.2.3 (app, CLI and MSI) and publish a GitHub Release with them. Every other build
+uploads the same files as a workflow artifact.
 
 ## Build and run
 

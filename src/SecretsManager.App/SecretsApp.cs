@@ -237,10 +237,12 @@ sealed class SecretsApp : Component
                         TextBlock(x.Kind.ToString()).Opacity(0.8),
                         metaColumns.Select(k => (Element)TextBlock(AppState.MetadataValue(x, k)).Opacity(0.8).Margin(0, 0, 8, 0)),
                         TextBlock(AppState.OtherMetadataText(x, metaColumns)).Opacity(0.8)
-                    ).Padding(0, 6, 0, 6).OnDoubleTapped((_, _) => Fire(Store.ViewSecretAsync())))
+                    ).Padding(0, 6, 0, 6))
                 .SelectionChanged(sel => Store.SelectSecret(sel.FirstOrDefault()?.Name))
                 .Set(lv => { if (lv.SelectedIndex != selectedIndex) lv.SelectedIndex = selectedIndex; })
                 .OnPreviewKeyDown((_, e) => OnListKey(e)) // preview: the ListView consumes Enter before KeyDown
+                // On the list, not the row: a row's grid has no background, so only clicks on its text reached it.
+                .OnDoubleTapped((_, _) => { if (Store.State.CurrentSecret is not null) _ = Store.ViewSecretAsync(); })
                 .AutomationId("SecretList");
 
         return Grid(
@@ -403,6 +405,7 @@ sealed class SecretsApp : Component
             CheckBox(st.MinimizeToTray, v => Set(x => x with { MinimizeToTray = v }), "Minimize to the notification area (tray icon)")
                 .AutomationId("TrayCheck"),
             Caption(JsonFileSettingsStore.DefaultPath).FontFamily("Consolas").Opacity(0.6),
+            Caption($"PowerShell Secrets {typeof(AppServices).Assembly.GetName().Version?.ToString(3)}").Opacity(0.6).AutomationId("VersionText"),
             Buttons(Button("Close", Store.CloseSettings).AccentButton().AutomationId("SettingsCloseButton"))
         ).MinWidth(480).AutomationId("SettingsPanel");
     }

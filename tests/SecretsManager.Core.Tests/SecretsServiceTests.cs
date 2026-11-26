@@ -15,6 +15,22 @@ public sealed class TestVaultFixture : IAsyncLifetime
     public TestVaultFixture() =>
         Service = new SecretsService(Host, Path.Combine(Path.GetTempPath(), "sg-no-store-" + Guid.NewGuid().ToString("N")));
 
+    /// <summary>
+    /// Like the app (BundledModules), append the bundled SecretManagement/SecretStore copies to PSModulePath. On a machine
+    /// without them installed (CI), these tests then prove the bundled modules work; where the user installed them, theirs win.
+    /// </summary>
+    static TestVaultFixture()
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var bundled = Path.Combine(dir.FullName, "third_party", "PowerShellModules");
+            if (!Directory.Exists(bundled)) continue;
+            var path = Environment.GetEnvironmentVariable("PSModulePath") ?? "";
+            Environment.SetEnvironmentVariable("PSModulePath", path.TrimEnd(';') + ";" + bundled);
+            return;
+        }
+    }
+
     static string ModulePath
     {
         get

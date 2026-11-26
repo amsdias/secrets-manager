@@ -22,6 +22,8 @@ dotnet publish src/SecretsManager.App -c Release -p:Platform=x64 -r win-x64 --se
 dotnet publish src/SecretsManager.Cli -c Release -r win-x64 -o publish   # NativeAOT (needs the MSVC linker)
 pwsh -NoProfile -File tools/Install-SecretsManager.ps1       # both publishes + install to %LOCALAPPDATA%\Programs\SecretsManager + Start menu shortcut
 pwsh -NoProfile -File tools/New-AppIcon.ps1                  # redraw src/SecretsManager.App/Assets/app.ico
+dotnet build installer/SecretsManager.Installer.wixproj -c Release -p:Version=1.2.3 -p:PublishDir=<publish folder>\   # per-user MSI (WiX 6)
+git tag v1.2.3 && git push origin v1.2.3                     # CI builds that version and creates the GitHub Release
 ```
 
 Run the UI test after any change in `src/SecretsManager.App`, **after rebuilding** (it runs the existing Debug exe: a stale exe once
@@ -49,6 +51,12 @@ run the UI test with `-ExePath` on the installed exe. Verifying only the Debug b
   AppStore methods. Simple questions use `PromptDialog`, a ContentDialog keyed by prompt Id that reports its answer from `OnClosed`.
   Forms (editor, viewer, register vault, store settings) are in-window overlay panels, **not** ContentDialogs: only one ContentDialog can
   be open per XamlRoot, and a locked vault must be able to prompt on top of a form.
+- **Bundled modules** (`BundledModules`): SecretManagement + SecretStore from `third_party/PowerShellModules` (Microsoft-signed, MIT)
+  and the WindowsVault module are embedded, copied to `%LOCALAPPDATA%\SecretsManager\Modules` at startup and appended to
+  PSModulePath (installed copies win). The integration tests append the same folder, and CI installs nothing, so CI proves
+  they work on a clean machine.
+- **Installer** (`installer/`, WiX 6.0.2; 7.x needs an OSMF EULA acceptance, so not upgraded without asking): per-user MSI.
+  **Not MSIX**: a packaged app's %LOCALAPPDATA% writes are virtualized, so it would see a different SecretStore than PowerShell.
 - **`src/WindowsVault`**: the SecretsManager.WindowsVault extension vault (PowerShell, DPAPI via `ConvertFrom-SecureString`), for
   keys read without approval. Embedded in the app and installed to `%LOCALAPPDATA%\SecretsManager\Modules` at startup
   (`WindowsVaultModule`), because SecretManagement records the module path and a single-file build runs from a temp folder.
