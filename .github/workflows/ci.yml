@@ -48,7 +48,7 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $files = Get-ChildItem publish -File
           $files | Format-Table Name, @{ n = 'MB'; e = { [math]::Round($_.Length / 1MB, 1) } } | Out-String | Write-Host
-          if (($files.Name | Sort-Object) -join ',' -ne 'SecretsManager.Cli.exe,SecretsManager.exe') { throw "unexpected publish output: $($files.Name -join ', ')" }
+          if (($files.Name | Sort-Object) -join ',' -ne 'secrets.exe,SecretsManager.exe') { throw "unexpected publish output: $($files.Name -join ', ')" }
 
       - name: Installer (MSI)
         shell: pwsh

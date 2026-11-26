@@ -826,7 +826,7 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
         {
             var r = await AskAsync(new PromptRequest(PromptKind.Password, "Unlock with Windows Hello", attempt == 1
                 ? "Enter the SecretStore password once. It is then saved encrypted with a Windows Hello key on this PC, and " +
-                  "Windows Hello (PIN, face or fingerprint) unlocks the store from then on, in the app and for 'SecretsManager.exe get'."
+                  "Windows Hello (PIN, face or fingerprint) unlocks the store from then on, in the app and for 'secrets get'."
                 : "The password was not accepted. Enter the SecretStore password.") { PrimaryText = "Continue" });
             if (r?.Password is not { Length: > 0 } password) { SetStatus("Windows Hello unlock was not turned on."); return; }
             try { await secrets.UnlockStoreAsync(password); }

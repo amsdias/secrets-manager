@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace SecretsManager.Core;
 
 /// <summary>
-/// The command line: "SecretsManager.exe get &lt;name&gt;" prints a secret's value, for scripts and tools such as Claude Code.
+/// The command line: "secrets get &lt;name&gt;" (secrets.exe relays to "SecretsManager.exe get") prints a secret's value, for scripts and tools such as Claude Code.
 /// Vaults without a password (Windows-account vaults, a SecretStore without a password) answer silently. A SecretStore
 /// with a password is unlocked through <see cref="IStorePasswordProvider"/> (Windows Hello), so every read asks.
 /// Without --vault, every other vault is searched before SecretStore, so finding a dev key never triggers Windows Hello.
@@ -13,7 +13,7 @@ public static class SecretsCli
     public const int Found = 0, NotFound = 1, Denied = 2, Failed = 3;
 
     public const string Usage = """
-        Usage: SecretsManager.exe get <name> [--vault <vault>] [--field password|username]
+        Usage: secrets get <name> [--vault <vault>] [--field password|username]
 
         Prints the value of a secret to standard output (no trailing newline).
           String, SecureString  the text
@@ -26,7 +26,8 @@ public static class SecretsCli
 
         Exit codes: 0 found, 1 not found, 2 cancelled or locked, 3 error.
         Use the value inside a command instead of printing it, e.g. in PowerShell:
-          $env:API_KEY = SecretsManager.exe get api-key; ./deploy.ps1
+          $env:API_KEY = secrets get api-key; ./deploy.ps1
+          or in bash: API_KEY="$(secrets get api-key)" ./deploy.sh
         """;
 
     public static async Task<int> RunAsync(IReadOnlyList<string> args, ISecretsService secrets, IStorePasswordProvider? storePassword,

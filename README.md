@@ -12,7 +12,7 @@ A native Windows desktop app for
 
 Download `PowerShellSecrets-<version>-x64.msi` from [Releases](https://github.com/amsdias/secrets-manager/releases) and run it.
 It installs for your account only (no admin rights) into `%LOCALAPPDATA%\Programs\SecretsManager`, adds **PowerShell Secrets** to
-the Start menu, and can be removed from Settings > Apps. Uninstalling keeps your settings, vaults and secrets.
+the Start menu, puts `secrets` (the command line, below) on your user PATH, and can be removed from Settings > Apps. Uninstalling keeps your settings, vaults and secrets.
 
 Nothing else is needed: the app is self-contained (no .NET install) and ships Microsoft.PowerShell.SecretManagement and
 Microsoft.PowerShell.SecretStore (see [third_party](third_party/README.md)). If you have those modules installed, yours are used.
@@ -32,7 +32,7 @@ pwsh -File tools/Install-SecretsManager.ps1 -Uninstall  # remove the app and its
 
 Run it again to update (close the app first). No admin rights are needed. Nothing else needs installing: `SecretsManager.exe` is a
 self-contained, compressed single file (about 90 MB) that unpacks itself to `%TEMP%\.net\SecretsManager` the first time each
-version starts, and `SecretsManager.Cli.exe` is a small native exe.
+version starts, and `secrets.exe` is a small native exe. The install folder is added to your user PATH, so `secrets get <name>` works in new terminals.
 
 ## Releases
 
@@ -86,17 +86,31 @@ Where a secret lives decides whether reading it asks for approval:
 With Hello unlock on, the store password is saved only sealed by a Windows Hello key in the TPM: nothing can read the store
 without a Hello check. Move a key between vaults with **Copy to vault…**.
 
-From a script, a terminal or Claude Code, use the console front end next to the app:
+From a script, a terminal or Claude Code, use `secrets` (`secrets.exe`, installed next to the app and on your PATH; open a new
+terminal after installing):
 
 ```powershell
-$cli = "$env:LOCALAPPDATA\Programs\SecretsManager\SecretsManager.Cli.exe"
-& $cli get api-key                     # prints the value; exit 0 found, 1 not found, 2 cancelled/locked, 3 error
-& $cli get db-login --field username   # PSCredential: password by default, or the user name
-& $cli get api-key --vault Dev         # without --vault, password-free vaults are searched before SecretStore
+secrets get api-key                     # prints the value; exit 0 found, 1 not found, 2 cancelled/locked, 3 error
+secrets get db-login --field username   # PSCredential: password by default, or the user name
+secrets get api-key --vault Dev         # without --vault, password-free vaults are searched before SecretStore
 ```
 
 Use a value inside the command instead of printing it, so it doesn't end up in logs or in a chat transcript:
-`$env:API_KEY = & $cli get api-key; ./deploy.ps1`. Windows-account vaults also work with plain `Get-Secret`.
+`$env:API_KEY = secrets get api-key; ./deploy.ps1` (PowerShell) or `API_KEY="$(secrets get api-key)" ./deploy.sh` (bash).
+
+### Telling Claude Code
+
+Claude Code doesn't discover `secrets` by itself. Add this to `~/.claude/CLAUDE.md` (all projects) or a project's CLAUDE.md:
+
+```markdown
+## Secrets (API keys, tokens, passwords)
+
+Read them with the `secrets` command (PowerShell Secrets) instead of asking me to paste them or creating files:
+- PowerShell: `$env:API_KEY = secrets get <name>; <command>`, bash: `API_KEY="$(secrets get <name>)" <command>`.
+- Never print, echo or log a value, and never write one to a file or commit it. Pass it straight to the command that needs it.
+- Exit codes: 1 not found (ask me for the name), 2 I declined Windows Hello or the store is locked (don't retry; ask), 3 error.
+- `--vault <name>` picks a vault; `--field username` gives a credential's user name.
+``` Windows-account vaults also work with plain `Get-Secret`.
 
 ## Security notes
 

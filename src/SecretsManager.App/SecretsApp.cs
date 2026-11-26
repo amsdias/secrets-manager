@@ -516,7 +516,7 @@ sealed class SecretsApp : Component
                     : "Encrypted locally, with a password (which Windows Hello can unlock) or protected only by your Windows account. " +
                       "There is one SecretStore per Windows user. Good for production keys."),
             VaultKind.WindowsAccount => "Encrypted for your Windows account, with no password: the app, scripts and " +
-                "'SecretsManager.exe get' read it without asking. Good for development keys. Anything running as you can read it.",
+                "'secrets get' read it without asking. Good for development keys. Anything running as you can read it.",
             _ => "Any installed SecretManagement extension (e.g. Az.KeyVault, SecretManagement.KeePass), by name or path.",
         };
         return VStack(12,
@@ -567,7 +567,7 @@ sealed class SecretsApp : Component
                 : Caption("Windows Hello isn't set up on this PC (Settings > Accounts > Sign-in options).").TextWrapping().Opacity(0.7),
             Caption(st.Original.Authentication == StoreAuthentication.Password
                 ? "The store password is saved sealed by a Windows Hello key on this PC. Every unlock, in this app or with " +
-                  "'SecretsManager.exe get', then asks for your PIN, face or fingerprint. Keep keys that should never ask in a Windows-account vault."
+                  "'secrets get', then asks for your PIN, face or fingerprint. Keep keys that should never ask in a Windows-account vault."
                 : "Only for a store with a password.").TextWrapping().Opacity(0.7),
             ErrorText(st.Error),
             Grid(columns: [GridSize.Star(), GridSize.Auto], rows: [GridSize.Auto],

@@ -7,7 +7,7 @@
     No admin rights. Your vaults, secrets and settings (%LOCALAPPDATA%\SecretsManager) are never touched.
 
     The app is two files: SecretsManager.exe (self-contained, compressed single file: no .NET needed; each new version
-    extracts itself to %TEMP%\.net\SecretsManager on first start) and SecretsManager.Cli.exe (native, for "get").
+    extracts itself to %TEMP%\.net\SecretsManager on first start) and secrets.exe (native, for "secrets get"; the install folder is added to your user PATH).
     -FrameworkDependent builds a larger, uncompressed SecretsManager.exe that needs the .NET 11 Desktop Runtime.
 .EXAMPLE
     pwsh -File tools/Install-SecretsManager.ps1              # build and install (or update)
@@ -40,6 +40,24 @@ function Assert-OurFolder {
         throw "$Destination exists and doesn't contain $exeName; refusing to overwrite or delete it."
     }
 }
+function Set-UserPathEntry([string]$Folder, [bool]$Present) {
+    # Edit HKCU\Environment\Path directly: [Environment]::SetEnvironmentVariable(..., 'User') would rewrite it as REG_SZ and
+    # expand entries like %USERPROFILE%\bin. Windows joins it with the system PATH; only new terminals see the change.
+    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+    try {
+        $old = [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        $kind = if ($old) { $key.GetValueKind('Path') } else { [Microsoft.Win32.RegistryValueKind]::ExpandString }
+        $entries = @($old -split ';' | Where-Object { $_ -and $_.TrimEnd('\') -ne $Folder.TrimEnd('\') })
+        if ($Present) { $entries += $Folder }
+        $new = $entries -join ';'
+        if ($new -eq $old) { return }
+        $key.SetValue('Path', $new, $kind)
+    }
+    finally { $key.Dispose() }
+    # Tell Explorer (and so new terminals) that the environment changed: setting any user variable broadcasts WM_SETTINGCHANGE.
+    [Environment]::SetEnvironmentVariable('SecretsManagerPathRefresh', $null, 'User')
+    if ($Present) { "Added $Folder to your user PATH (new terminals)" } else { "Removed $Folder from your user PATH" }
+}
 function Assert-NotRunning {
     $running = Get-Process SecretsManager -ErrorAction SilentlyContinue |
         Where-Object { $_.Path -and $_.Path.StartsWith($Destination, [StringComparison]::OrdinalIgnoreCase) }
@@ -52,6 +70,7 @@ Assert-NotRunning
 if ($Uninstall) {
     foreach ($link in $startMenuLink, $desktopLink) { if (Test-Path $link) { Remove-Item $link; "Removed $link" } }
     if (Test-Path $Destination) { Remove-Item $Destination -Recurse -Force; "Removed $Destination" }
+    Set-UserPathEntry $Destination $false
     "Settings in $(Join-Path $env:LOCALAPPDATA 'SecretsManager') were kept. Vaults and secrets are not affected."
     exit 0
 }
@@ -89,5 +108,6 @@ foreach ($link in @($startMenuLink) + @(if ($Desktop) { $desktopLink })) {
     $shortcut.Save()
     "Shortcut: $link"
 }
+Set-UserPathEntry $Destination $true
 "Installed to $Destination"
 exit 0

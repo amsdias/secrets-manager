@@ -19,7 +19,7 @@ dotnet test --project tests/SecretsManager.Core.Tests -- --filter-method "*Locke
 dotnet test --project tests/SecretsManager.Core.Tests -- --explicit only              # real SecretStore round trip
 pwsh -NoProfile -File tests/Invoke-AppUiTest.ps1 [-ExePath publish\SecretsManager.exe]  # UI Automation E2E (build first)
 dotnet publish src/SecretsManager.App -c Release -p:Platform=x64 -r win-x64 --self-contained -p:PublishSingleFile=true -p:DebugType=embedded -o publish  # compressed
-dotnet publish src/SecretsManager.Cli -c Release -r win-x64 -o publish   # NativeAOT (needs the MSVC linker)
+dotnet publish src/SecretsManager.Cli -c Release -r win-x64 -o publish   # secrets.exe, NativeAOT (needs the MSVC linker)
 pwsh -NoProfile -File tools/Install-SecretsManager.ps1       # both publishes + install to %LOCALAPPDATA%\Programs\SecretsManager + Start menu shortcut
 pwsh -NoProfile -File tools/New-AppIcon.ps1                  # redraw src/SecretsManager.App/Assets/app.ico
 dotnet build installer/SecretsManager.Installer.wixproj -c Release -p:Version=1.2.3 -p:PublishDir=<publish folder>\   # per-user MSI (WiX 6)
@@ -65,7 +65,8 @@ run the UI test with `-ExePath` on the installed exe. Verifying only the Debug b
   `%LOCALAPPDATA%\SecretsManager\secretstore.hello`. AppStore tries it before the typed password. Can't be automated: the
   Hello prompt needs the user.
 - **Command line**: `SecretsManager.exe get` runs `SecretsCli` (Core) with no window. `src/SecretsManager.Cli` is a console
-  relay, because **PowerShell neither waits for nor captures a GUI-subsystem exe** (`$x = & SecretsManager.exe get …` is empty).
+  relay named **`secrets.exe`** (the MSI and the install script add its folder to the user PATH; the user's
+  `~/.claude/CLAUDE.md` tells Claude Code to use `secrets get`), because **PowerShell neither waits for nor captures a GUI-subsystem exe** (`$x = & SecretsManager.exe get …` is empty).
   `SECRETSMANAGER_APP` overrides the exe it relays to (the UI test uses it).
 - **`tests/TestVault`** is a minimal file-backed SecretManagement extension vault, shared by the C# tests and `legacy/`.
   `VaultParameters.Path` is a Clixml file; the optional `Password` simulates a locked vault, with unlock state kept in a `.unlocked`

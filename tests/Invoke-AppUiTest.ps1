@@ -12,8 +12,8 @@ Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 Import-Module Microsoft.PowerShell.SecretManagement
 
 $exe = if ($ExePath) { $ExePath } else { Join-Path $PSScriptRoot "..\src\SecretsManager.App\bin\x64\$Configuration\net11.0-windows10.0.22621.0\SecretsManager.exe" }
-$cli = if ($CliPath) { $CliPath } elseif ($ExePath) { Join-Path (Split-Path $ExePath) 'SecretsManager.Cli.exe' } else {
-    Join-Path $PSScriptRoot "..\src\SecretsManager.Cli\bin\$Configuration\net11.0\SecretsManager.Cli.exe" }
+$cli = if ($CliPath) { $CliPath } elseif ($ExePath) { Join-Path (Split-Path $ExePath) 'secrets.exe' } else {
+    Join-Path $PSScriptRoot "..\src\SecretsManager.Cli\bin\$Configuration\net11.0\secrets.exe" }
 if (-not (Test-Path $cli)) { throw "Build the CLI first: dotnet build src/SecretsManager.Cli ($cli not found)" }
 if (-not (Test-Path $exe)) { throw "Build the app first: dotnet build src/SecretsManager.App -p:Platform=x64 ($exe not found)" }
 
@@ -251,14 +251,14 @@ try {
     [void](Wait-For { ById 'NoPasswordText' } '"No password" next to the vault name')
     if ((ById 'UnlockButton') -or (ById 'LockButton')) { throw 'a vault without a password offers Lock or Unlock' }
     Pass 'a vault without a password says so and offers no Lock/Unlock'
-    # SecretsManager.Cli.exe (console) relays to the exe under test: PowerShell doesn't capture a GUI exe's output.
+    # secrets.exe (console) relays to the exe under test: PowerShell doesn't capture a GUI exe's output.
     $env:SECRETSMANAGER_APP = (Resolve-Path $exe).Path
     $cliOut = & $cli get devkey --vault $dev
     if ($LASTEXITCODE -ne 0 -or $cliOut -ne 'dev-value-123') { throw "get returned '$cliOut' (exit $LASTEXITCODE)" }
     $null = & $cli get "missing-$suffix" 2>$null
     if ($LASTEXITCODE -ne 1) { throw "get of a missing secret exited $LASTEXITCODE, expected 1" }
     Remove-Item Env:SECRETSMANAGER_APP
-    Pass 'SecretsManager.Cli get prints a dev key without asking; exit 1 when missing'
+    Pass 'secrets get prints a dev key without asking; exit 1 when missing'
 
     # --- Remove… on a Windows-account vault: the options are radio buttons; "delete its secrets too"
     Select-Row $dev 'VaultList'
