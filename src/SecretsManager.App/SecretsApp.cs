@@ -127,7 +127,11 @@ sealed class SecretsApp : Component
         return Grid(
             columns: [GridSize.Star()],
             rows: [GridSize.Auto, GridSize.Star(), GridSize.Auto],
-            Subtitle("Vaults").Margin(0, 0, 0, 8).Grid(row: 0),
+            Grid(columns: [GridSize.Star(), GridSize.Auto], rows: [GridSize.Auto],
+                Subtitle("Vaults").VAlign(VerticalAlignment.Center),
+                Button(IconGlyph(Cog, 16), Store.OpenSettings).ToolTip("Settings: theme, auto-lock, clipboard, tray (Ctrl+,)")
+                    .AutomationName("Settings").AutomationId("SettingsButton").Grid(row: 0, column: 1)
+            ).Margin(0, 0, 0, 8).Grid(row: 0),
             ListView<VaultInfo>(s.Vaults, v => v.Name, (v, _) =>
                     Grid(columns: [GridSize.Star(), GridSize.Auto, GridSize.Auto], rows: [GridSize.Auto],
                         VStack(0,
@@ -173,10 +177,9 @@ sealed class SecretsApp : Component
                     .ToolTip("Save every secret of this vault to a password-encrypted file").AutomationId("ExportButton"), 2, 1),
                 Cell(Button("Set as default", () => _ = Store.SetDefaultVaultAsync()).IsEnabled(vault is { IsDefault: false })
                     .ToolTip("The vault Get-Secret and Set-Secret use when no -Vault is given").AutomationId("DefaultVaultButton"), 3, 0, columnSpan: 2),
-                SectionLabel("Settings", 4).Margin(0, 8, 0, 6),
-                Cell(Button("SecretStore…", () => _ = Store.OpenStoreSettingsAsync()).IsEnabled(s.SecretStoreAvailable)
-                    .ToolTip("Password, Windows Hello, timeout, reset (shared by every SecretStore vault)").AutomationId("StoreSettingsButton"), 5, 0),
-                Cell(Button("App…", Store.OpenSettings).ToolTip("Theme, auto-lock, clipboard, tray (Ctrl+,)").AutomationId("SettingsButton"), 5, 1)
+                SectionLabel("SecretStore", 4).Margin(0, 8, 0, 6),
+                Cell(Button("SecretStore settings…", () => _ = Store.OpenStoreSettingsAsync()).IsEnabled(s.SecretStoreAvailable)
+                    .ToolTip("Password, Windows Hello, timeout, reset (shared by every SecretStore vault)").AutomationId("StoreSettingsButton"), 5, 0, columnSpan: 2)
             ));
     }
 
@@ -237,7 +240,7 @@ sealed class SecretsApp : Component
                     ).Padding(0, 6, 0, 6).OnDoubleTapped((_, _) => Fire(Store.ViewSecretAsync())))
                 .SelectionChanged(sel => Store.SelectSecret(sel.FirstOrDefault()?.Name))
                 .Set(lv => { if (lv.SelectedIndex != selectedIndex) lv.SelectedIndex = selectedIndex; })
-                .OnKeyDown((_, e) => OnListKey(e))
+                .OnPreviewKeyDown((_, e) => OnListKey(e)) // preview: the ListView consumes Enter before KeyDown
                 .AutomationId("SecretList");
 
         return Grid(
@@ -282,13 +285,21 @@ sealed class SecretsApp : Component
 
     const string IconFont = "Segoe Fluent Icons";
     static string Glyph(int codePoint) => ((char)codePoint).ToString();
-    static readonly string ClosedPadlock = Glyph(0xE72E), OpenPadlock = Glyph(0xE785);
+    static readonly string ClosedPadlock = Glyph(0xE72E), OpenPadlock = Glyph(0xE785), Cog = Glyph(0xE713);
+
+    /// <summary>
+    /// An icon-font glyph as text (TextBlock takes a themed Foreground; IconElement doesn't). Tight line bounds drop the
+    /// font's empty ascent/descent, so the glyph centres vertically like the text beside it.
+    /// </summary>
+    static TextBlockElement IconGlyph(string glyph, double size) =>
+        TextBlock(glyph).FontFamily(IconFont).FontSize(size)
+            .Set(tb => tb.TextLineBounds = Microsoft.UI.Xaml.TextLineBounds.Tight);
 
     /// <summary>Closed padlock (locked), open padlock (unlocked), nothing otherwise.</summary>
     static Element? Padlock(LockStatus status, double size) => status switch
     {
-        LockStatus.Locked => TextBlock(ClosedPadlock).FontFamily(IconFont).FontSize(size).Foreground(Theme.SystemCaution).ToolTip("Locked").AutomationName("Locked"),
-        LockStatus.Unlocked => TextBlock(OpenPadlock).FontFamily(IconFont).FontSize(size).Foreground(Theme.SystemSuccess).ToolTip("Unlocked").AutomationName("Unlocked"),
+        LockStatus.Locked => IconGlyph(ClosedPadlock, size).Foreground(Theme.SystemCaution).ToolTip("Locked").AutomationName("Locked"),
+        LockStatus.Unlocked => IconGlyph(OpenPadlock, size).Foreground(Theme.SystemSuccess).ToolTip("Unlocked").AutomationName("Unlocked"),
         _ => null,
     };
 
@@ -296,12 +307,12 @@ sealed class SecretsApp : Component
     Element? LockControl(AppState s) => s.CurrentLockStatus switch
     {
         LockStatus.Locked => HStack(8,
-            Padlock(LockStatus.Locked, 16)!, Caption("Locked").Foreground(Theme.SystemCaution).VAlign(VerticalAlignment.Center),
+            Padlock(LockStatus.Locked, 16)!.VAlign(VerticalAlignment.Center), Caption("Locked").Foreground(Theme.SystemCaution).VAlign(VerticalAlignment.Center),
             Button("Unlock…", () => _ = Store.UnlockSelectedVaultAsync()).AccentButton()
                 .ToolTip(s.HelloEnabled && s.CurrentVault is { IsSecretStore: true } ? "Unlock with Windows Hello" : "Enter the vault's password")
                 .AutomationId("UnlockButton")),
         LockStatus.Unlocked => HStack(8,
-            Padlock(LockStatus.Unlocked, 16)!, Caption("Unlocked").Foreground(Theme.SystemSuccess).VAlign(VerticalAlignment.Center),
+            Padlock(LockStatus.Unlocked, 16)!.VAlign(VerticalAlignment.Center), Caption("Unlocked").Foreground(Theme.SystemSuccess).VAlign(VerticalAlignment.Center),
             Button("Lock", () => _ = Store.LockAsync())
                 .ToolTip("Lock now (Ctrl+L): also closes the open secret and clears a copied value").AutomationId("LockButton")),
         LockStatus.NoPassword => Caption("No password: protected by your Windows account").Opacity(0.7).VAlign(VerticalAlignment.Center)
@@ -322,6 +333,7 @@ sealed class SecretsApp : Component
             case VirtualKey.L when ctrl: _ = Store.LockAsync(); break;
             case VirtualKey.E when ctrl && !s.HasPanel && s.CurrentSecret is not null: _ = Store.OpenEditSecretAsync(); break;
             case VirtualKey.F1: _ = Store.ShowShortcutsAsync(); break;
+            case VirtualKey.Escape when s.HasPanel: ClosePanels(); break;
             case (VirtualKey)188 when ctrl && !s.HasPanel: Store.OpenSettings(); break; // Ctrl+, (VK_OEM_COMMA)
             default: return;
         }

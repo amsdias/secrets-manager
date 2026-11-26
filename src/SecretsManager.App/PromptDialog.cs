@@ -23,6 +23,7 @@ sealed class PromptDialog : Component<PromptRequest>
         var (current, setCurrent) = UseState("");
         var (option, setOption) = UseState(false);
         var (choice, setChoice) = UseState(0);
+        var dialog = UseRef<ContentDialog?>(null);
 
         var valid = p.Kind switch
         {
@@ -56,7 +57,7 @@ sealed class PromptDialog : Component<PromptRequest>
             _ => Empty(),
         };
 
-        return ContentDialog(p.Title,
+        return (ContentDialog(p.Title,
             VStack(12,
                 TextBlock(p.Message).TextWrapping().IsTextSelectionEnabled(p.Kind == PromptKind.Info),
                 body,
@@ -68,8 +69,15 @@ sealed class PromptDialog : Component<PromptRequest>
             CloseButtonText = p.Kind switch { PromptKind.Info => null, PromptKind.Confirm when !p.IsDanger => "Not now", _ => "Cancel" },
             DefaultButton = p.IsDanger ? ContentDialogButton.Close : ContentDialogButton.Primary,
             IsPrimaryButtonEnabled = valid,
+            // Move focus into the dialog as it opens, so Esc, Enter and typing work without clicking it first.
+            OnOpened = () =>
+            {
+                if (dialog.Current is not { } cd) return;
+                var first = Microsoft.UI.Xaml.Input.FocusManager.FindFirstFocusableElement(cd);
+                if (first is not null) _ = Microsoft.UI.Xaml.Input.FocusManager.TryFocusAsync(first, FocusState.Programmatic);
+            },
             OnClosed = result => AppServices.Store.CompletePrompt(result != ContentDialogResult.Primary ? null : new PromptResult(
                 Text: text, Password: option ? null : password, CurrentPassword: current, Option: option, ChoiceIndex: choice)),
-        };
+        }).Set(cd => dialog.Current = cd);
     }
 }

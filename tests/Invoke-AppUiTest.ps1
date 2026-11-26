@@ -170,10 +170,12 @@ try {
 
     # --- locked vault: wrong password re-prompts, right one unlocks
     Select-Row $locked 'VaultList'
-    [void](Wait-For { ById 'PromptPassword' } 'automatic unlock prompt')
+    [void](Wait-For { $b = ById 'PromptPassword'; $b -and $b.Current.HasKeyboardFocus } 'unlock prompt with focus in its password box')
+    Pass 'a dialog takes keyboard focus when it opens (Esc and typing work at once)'
     Invoke-El (Wait-For { ByName 'Cancel' $CT::Button } 'Cancel in the unlock prompt')
     Invoke-El (Wait-For { $b = ById 'UnlockButton'; if ($b -and (ByName 'Locked')) { $b } } 'padlock and Unlock button next to the vault name')
     Pass 'a locked vault shows the padlock and an Unlock button'
+    Save-Shot 'padlock-locked'
     Set-Val (Wait-For { ById 'PromptPassword' } 'unlock prompt') 'wrong'
     Invoke-El (Wait-For { ByName 'Unlock' $CT::Button } 'Unlock button')
     [void](Wait-For { ByName "The password was not accepted. Enter the password for '$locked'." } 're-prompt')
