@@ -274,6 +274,28 @@ public sealed class FeatureTests : IDisposable
         Assert.Equal(("System", 5), (settings.Current.Theme, settings.Current.ClipboardClearSeconds));
     }
 
+    [Fact]
+    public async Task Padlock_shows_locked_unlocked_or_no_password_for_each_vault()
+    {
+        var prod = AddStoreVault();            // SecretStore with a password, starts locked
+        _svc.StoreConfig = new(StoreAuthentication.Password, 900, StoreInteraction.None);
+        _svc.AddVault("dev", module: @"C:\m\SecretsManager.WindowsVault.psd1");
+        _svc.AddVault("other");
+        var store = Store();
+        var prompts = new PromptScript(store, _ => null); // cancel the first unlock
+        await store.InitializeAsync();
+        VaultInfo V(string n) => store.State.Vaults.Single(v => v.Name == n);
+        Assert.Equal(LockStatus.Locked, store.State.LockStatusOf(V("store")));
+        Assert.Equal(LockStatus.NoPassword, store.State.LockStatusOf(V("dev")));
+        Assert.Equal(LockStatus.Unknown, store.State.LockStatusOf(V("other")));
+
+        prompts.Then(_ => new PromptResult(Password: "pw"));
+        await store.UnlockSelectedVaultAsync();
+        Assert.Equal(LockStatus.Unlocked, store.State.CurrentLockStatus);
+        await store.LockAsync();
+        Assert.Equal(LockStatus.Locked, store.State.CurrentLockStatus);
+    }
+
     // ------------------------------------------------------------------ metadata
 
     static AppState WithSecrets(params (string Name, Dictionary<string, string> Meta)[] secrets) => new()

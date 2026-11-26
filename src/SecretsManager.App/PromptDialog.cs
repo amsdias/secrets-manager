@@ -48,6 +48,10 @@ sealed class PromptDialog : Component<PromptRequest>
                 PasswordBox(password, setPassword, "New password").AutomationName("New password").AutomationId("PromptPassword"),
                 PasswordBox(confirm, setConfirm, "Confirm new password").AutomationName("Confirm new password").AutomationId("PromptConfirm")),
             PromptKind.Text => TextBox(text, setText).AutomationName(p.Title).AutomationId("PromptText"),
+            // A few long options read better (and wrap) as radio buttons; a long list (vault names) stays a drop-down.
+            PromptKind.Choice when p.Choices.Count <= 4 => VStack(4, p.Choices.Select((c, i) => (Element)RadioButton(
+                    TextBlock(c).TextWrapping(), choice == i, on => { if (on) setChoice(i); }, groupName: $"prompt-{p.Id}")
+                .AutomationName(c).AutomationId($"PromptChoice{i}")).ToArray()).AutomationId("PromptChoice").MaxWidth(440),
             PromptKind.Choice => ComboBox(p.Choices.ToArray(), choice, setChoice).AutomationName(p.Title).AutomationId("PromptChoice").HAlign(HorizontalAlignment.Stretch),
             _ => Empty(),
         };

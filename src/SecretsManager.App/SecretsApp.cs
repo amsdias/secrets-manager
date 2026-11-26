@@ -129,11 +129,12 @@ sealed class SecretsApp : Component
             rows: [GridSize.Auto, GridSize.Star(), GridSize.Auto],
             Subtitle("Vaults").Margin(0, 0, 0, 8).Grid(row: 0),
             ListView<VaultInfo>(s.Vaults, v => v.Name, (v, _) =>
-                    Grid(columns: [GridSize.Star(), GridSize.Auto], rows: [GridSize.Auto],
+                    Grid(columns: [GridSize.Star(), GridSize.Auto, GridSize.Auto], rows: [GridSize.Auto],
                         VStack(0,
                             TextBlock(v.Name).SemiBold(),
                             Caption(v.KindLabel).Opacity(0.7)),
-                        v.IsDefault ? Caption("default").Foreground(Theme.AccentText).VAlign(VerticalAlignment.Center).Grid(row: 0, column: 1) : null
+                        v.IsDefault ? Caption("default").Foreground(Theme.AccentText).VAlign(VerticalAlignment.Center).Margin(0, 0, 8, 0).Grid(row: 0, column: 1) : null,
+                        Padlock(s.LockStatusOf(v), 14)?.VAlign(VerticalAlignment.Center).Grid(row: 0, column: 2)
                     ).Padding(0, 6, 0, 6))
                 .SelectionChanged(sel => _ = Store.SelectVaultAsync(sel.FirstOrDefault()?.Name))
                 .Set(lv => { if (lv.SelectedIndex != selectedIndex) lv.SelectedIndex = selectedIndex; })
@@ -162,19 +163,20 @@ sealed class SecretsApp : Component
             Grid(
                 columns: [GridSize.Star(), GridSize.Star()],
                 rows: [GridSize.Auto, GridSize.Auto, GridSize.Auto, GridSize.Auto, GridSize.Auto, GridSize.Auto],
-                SectionLabel("Vault", 0),
+                SectionLabel("Manage", 0),
                 Cell(Button("Add vault…", Store.OpenVaultForm).ToolTip("Create a vault, or add an existing one back to the list").AutomationId("RegisterVaultButton"), 1, 0),
                 Cell(Button("Remove…", () => _ = Store.UnregisterSelectedVaultAsync()).IsEnabled(vault is not null)
                     .ToolTip("Remove the vault from the list (its secrets are kept unless you choose to delete them)").AutomationId("UnregisterVaultButton"), 1, 1),
-                Cell(Button("Set default", () => _ = Store.SetDefaultVaultAsync()).IsEnabled(vault is { IsDefault: false }).AutomationId("DefaultVaultButton"), 2, 0),
-                Cell(Button("Unlock…", () => _ = Store.UnlockSelectedVaultAsync()).IsEnabled(s.CanUnlock)
-                    .ToolTip("Enter the password of a locked vault (only vaults with a password can be locked)").AutomationId("UnlockButton"), 2, 1),
                 Cell(Button("Import…", () => _ = ImportAsync()).IsEnabled(vault is not null && !s.IsStoreMissing)
-                    .ToolTip("Import secrets from an encrypted export file into this vault").AutomationId("ImportButton"), 3, 0),
+                    .ToolTip("Import secrets from an encrypted export file into this vault").AutomationId("ImportButton"), 2, 0),
                 Cell(Button("Export…", () => _ = ExportAsync()).IsEnabled(vault is not null && !s.IsStoreMissing && !s.Secrets.IsEmpty)
-                    .ToolTip("Save every secret of this vault to a password-encrypted file").AutomationId("ExportButton"), 3, 1),
-                SectionLabel("SecretStore", 4).Margin(0, 8, 0, 6),
-                Cell(Button("Store settings…", () => _ = Store.OpenStoreSettingsAsync()).IsEnabled(s.SecretStoreAvailable).AutomationId("StoreSettingsButton"), 5, 0, columnSpan: 2)
+                    .ToolTip("Save every secret of this vault to a password-encrypted file").AutomationId("ExportButton"), 2, 1),
+                Cell(Button("Set as default", () => _ = Store.SetDefaultVaultAsync()).IsEnabled(vault is { IsDefault: false })
+                    .ToolTip("The vault Get-Secret and Set-Secret use when no -Vault is given").AutomationId("DefaultVaultButton"), 3, 0, columnSpan: 2),
+                SectionLabel("Settings", 4).Margin(0, 8, 0, 6),
+                Cell(Button("SecretStore…", () => _ = Store.OpenStoreSettingsAsync()).IsEnabled(s.SecretStoreAvailable)
+                    .ToolTip("Password, Windows Hello, timeout, reset (shared by every SecretStore vault)").AutomationId("StoreSettingsButton"), 5, 0),
+                Cell(Button("App…", Store.OpenSettings).ToolTip("Theme, auto-lock, clipboard, tray (Ctrl+,)").AutomationId("SettingsButton"), 5, 1)
             ));
     }
 
@@ -190,9 +192,11 @@ sealed class SecretsApp : Component
         var header = Grid(
             columns: [GridSize.Star(), GridSize.Px(300)],
             rows: [GridSize.Auto],
-            VStack(0,
-                Subtitle(vault?.Name ?? "No vault selected").AutomationId("VaultTitle"),
-                Caption(vault is null ? "" : vault.Description is { } d ? $"{vault.ModuleName} - {d}" : vault.ModuleName).Opacity(0.7)),
+            VStack(2,
+                HStack(10,
+                    Subtitle(vault?.Name ?? "No vault selected").AutomationId("VaultTitle"),
+                    LockControl(s)?.VAlign(VerticalAlignment.Center)),
+                Caption(vault is null ? "" : vault.Description is { } d ? $"{vault.KindLabel} - {d}" : vault.KindLabel).Opacity(0.7)),
             attachSearchRef(TextBox(s.Search, Store.SetSearch, placeholderText: "Search name or metadata (key=value)"))
                 .ToolTip("Search (Ctrl+F)").AutomationName("Search secrets").AutomationId("SearchBox").VAlign(VerticalAlignment.Center).Grid(row: 0, column: 1));
 
@@ -266,19 +270,44 @@ sealed class SecretsApp : Component
     {
         return Border(
             Grid(
-                columns: [GridSize.Star(), GridSize.Auto, GridSize.Auto, GridSize.Auto, GridSize.Auto],
+                columns: [GridSize.Star(), GridSize.Auto, GridSize.Auto],
                 rows: [GridSize.Auto],
                 TextBlock(s.Status).TextTrimming(TextTrimming.CharacterEllipsis).VAlign(VerticalAlignment.Center).AutomationId("StatusText"),
                 s.ClipboardSecondsLeft is { } left
                     ? TextBlock($"Clipboard clears in {left}s").Foreground(Theme.AccentText).Margin(12, 0, 12, 0).VAlign(VerticalAlignment.Center).AutomationId("ClipboardText").Grid(row: 0, column: 1)
                     : null,
-                s.IsBusy ? ProgressRing().Width(16).Height(16).Margin(0, 0, 12, 0).Grid(row: 0, column: 2) : null,
-                Button("Settings", Store.OpenSettings).ToolTip("Theme, auto-lock, clipboard and tray (Ctrl+,)")
-                    .AutomationId("SettingsButton").Margin(0, 0, 8, 0).Grid(row: 0, column: 3),
-                Button("Lock", () => _ = Store.LockAsync())
-                    .ToolTip("Lock now (Ctrl+L): close the open secret, clear a copied value, and lock a SecretStore that has a password").AutomationId("LockButton").Grid(row: 0, column: 4))
-        ).Background(Theme.LayerFill).Padding(14, 4, 14, 4);
+                s.IsBusy ? ProgressRing().Width(16).Height(16).Grid(row: 0, column: 2) : null)
+        ).Background(Theme.LayerFill).Padding(14, 8, 14, 8);
     }
+
+    const string IconFont = "Segoe Fluent Icons";
+    static string Glyph(int codePoint) => ((char)codePoint).ToString();
+    static readonly string ClosedPadlock = Glyph(0xE72E), OpenPadlock = Glyph(0xE785);
+
+    /// <summary>Closed padlock (locked), open padlock (unlocked), nothing otherwise.</summary>
+    static Element? Padlock(LockStatus status, double size) => status switch
+    {
+        LockStatus.Locked => TextBlock(ClosedPadlock).FontFamily(IconFont).FontSize(size).Foreground(Theme.SystemCaution).ToolTip("Locked").AutomationName("Locked"),
+        LockStatus.Unlocked => TextBlock(OpenPadlock).FontFamily(IconFont).FontSize(size).Foreground(Theme.SystemSuccess).ToolTip("Unlocked").AutomationName("Unlocked"),
+        _ => null,
+    };
+
+    /// <summary>Next to the vault name: the padlock, its state, and the one action that changes it.</summary>
+    Element? LockControl(AppState s) => s.CurrentLockStatus switch
+    {
+        LockStatus.Locked => HStack(8,
+            Padlock(LockStatus.Locked, 16)!, Caption("Locked").Foreground(Theme.SystemCaution).VAlign(VerticalAlignment.Center),
+            Button("Unlock…", () => _ = Store.UnlockSelectedVaultAsync()).AccentButton()
+                .ToolTip(s.HelloEnabled && s.CurrentVault is { IsSecretStore: true } ? "Unlock with Windows Hello" : "Enter the vault's password")
+                .AutomationId("UnlockButton")),
+        LockStatus.Unlocked => HStack(8,
+            Padlock(LockStatus.Unlocked, 16)!, Caption("Unlocked").Foreground(Theme.SystemSuccess).VAlign(VerticalAlignment.Center),
+            Button("Lock", () => _ = Store.LockAsync())
+                .ToolTip("Lock now (Ctrl+L): also closes the open secret and clears a copied value").AutomationId("LockButton")),
+        LockStatus.NoPassword => Caption("No password: protected by your Windows account").Opacity(0.7).VAlign(VerticalAlignment.Center)
+            .AutomationId("NoPasswordText"),
+        _ => null,
+    };
 
     /// <summary>Window-wide shortcuts (Ctrl+N and F5 are accelerators on their buttons). Every key press also counts as activity.</summary>
     void OnGlobalKey(Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e, Action focusSearch)

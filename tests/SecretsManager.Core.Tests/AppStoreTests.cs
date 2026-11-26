@@ -263,10 +263,10 @@ public class AppStoreTests
     {
         _svc.IsSecretStoreInitialized = true;
         _svc.StoreConfig = new(auth, 900, StoreInteraction.None);
-        _svc.AddVault("SecretStore", isDefault: true, module: VaultInfo.SecretStoreModule);
+        _svc.AddVault("SecretStore", password: auth == StoreAuthentication.Password ? "pw" : null, isDefault: true, module: VaultInfo.SecretStoreModule);
         var store = Store();
-        var prompts = new PromptScript(store, Password("pw"));
-        await store.InitializeAsync();
+        var prompts = new PromptScript(store, Password("pw"), Password("pw"));
+        await store.InitializeAsync();                         // a store with a password asks once to open
         Assert.Equal(auth, store.State.StoreAuthentication);
         Assert.False(store.State.CanUnlock);                   // unlocked (or no password): nothing to unlock
 
@@ -274,7 +274,8 @@ public class AppStoreTests
         Assert.Equal(canUnlock, store.State.CanUnlock);        // only a store with a password locks
         Assert.Contains(canUnlock ? "asks for its password" : "Nothing to lock", store.State.Status);
         await store.UnlockSelectedVaultAsync();
-        Assert.Equal(canUnlock ? 1 : 0, prompts.Asked.Count);  // no password prompt when there is no password
+        Assert.Equal(canUnlock ? 2 : 0, prompts.Asked.Count);  // never a password prompt when there is no password
+        Assert.Equal(canUnlock ? LockStatus.Unlocked : LockStatus.NoPassword, store.State.CurrentLockStatus);
     }
 
     [Fact]

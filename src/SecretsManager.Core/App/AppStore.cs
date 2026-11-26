@@ -124,6 +124,7 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
         var available = await secrets.IsSecretStoreModuleAvailableAsync();
         var hello = storePassword is not null && await storePassword.IsAvailableAsync();
         Update(s => s with { SecretStoreAvailable = available, HelloAvailable = hello, HelloEnabled = storePassword?.IsEnabled == true });
+        if (available && secrets.IsSecretStoreInitialized) await ProbeStoreAsync();
         await ReloadVaultsAsync(null);
         if (State.Vaults.IsEmpty && available &&
             await ConfirmAsync("Welcome", "No secret vaults are registered yet. Register a local SecretStore vault now?", "Register"))
@@ -171,6 +172,7 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
                 Secrets = list, IsVaultLocked = false, IsStoreMissing = false,
                 SelectedSecret = list.Any(x => x.Name == s.SelectedSecret) ? s.SelectedSecret : null,
                 Status = $"{list.Length} secret(s) in '{vault}'.",
+                StoreLocked = s.CurrentVault is { IsSecretStore: true } ? false : s.StoreLocked,
             });
             if (State.CurrentVault is { IsSecretStore: true })
             {
@@ -184,7 +186,12 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
         }
         catch (Exception ex) when (ex is OperationCanceledException or VaultLockedException)
         {
-            if (version == _loadVersion) Update(s => s with { IsVaultLocked = true, Secrets = [], Status = $"Vault '{vault}' is locked." });
+            if (version == _loadVersion) Update(s => s with
+            {
+                IsVaultLocked = true, Secrets = [], Status = $"Vault '{vault}' is locked.",
+                StoreLocked = s.CurrentVault is { IsSecretStore: true } ? true : s.StoreLocked,
+                StoreAuthentication = s.CurrentVault is { IsSecretStore: true } ? StoreAuthentication.Password : s.StoreAuthentication,
+            });
         }
     }
 
@@ -196,14 +203,14 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
             SetStatus(State.IsStoreMissing ? "The SecretStore hasn't been created yet." : $"'{vault.Name}' isn't locked.");
             return;
         }
-        var password = vault.IsSecretStore ? await TryHelloPassword() : null;
-        if (password is null)
+        // Same as the automatic prompt: Windows Hello first for SecretStore, and a wrong password asks again.
+        for (var attempt = 1; ; attempt++)
         {
-            var r = await AskAsync(new PromptRequest(PromptKind.Password, "Unlock vault", $"Enter the password for '{vault.Name}'.") { PrimaryText = "Unlock" });
-            if (r?.Password is null) return;
-            password = r.Password;
+            var password = await AskVaultPassword(vault.Name, attempt);
+            if (password is null) return;
+            try { await secrets.UnlockVaultAsync(vault.Name, password); break; }
+            catch (SecretsOperationException) when (attempt < 10) { }
         }
-        await secrets.UnlockVaultAsync(vault.Name, password);
         SetStatus($"Vault '{vault.Name}' unlocked.");
         await LoadSecretsAsync();
     });
@@ -602,6 +609,7 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
         await ClearClipboardIfOursAsync();
         var hasPassword = await StoreHasPasswordAsync();
         var locked = hasPassword && await secrets.LockStoreAsync();
+        if (locked) Update(s => s with { StoreLocked = true });
         if (hasPassword && State.CurrentVault is { IsSecretStore: true } && !State.IsStoreMissing)
             Update(s => s with { Secrets = [], SelectedSecret = null, IsVaultLocked = true });
 
@@ -613,6 +621,21 @@ public sealed class AppStore(ISecretsService secrets, IClipboard clipboard, Time
             : reason is null ? "Nothing to lock: none of your vaults uses a password." : null;
         if (message is not null) SetStatus(message);
     });
+
+    /// <summary>
+    /// At startup: learn whether the SecretStore has a password and is locked, without prompting, so every SecretStore
+    /// vault shows the right padlock before one is opened.
+    /// </summary>
+    async Task ProbeStoreAsync()
+    {
+        try
+        {
+            var config = await secrets.GetStoreConfigAsync();
+            Update(s => s with { StoreAuthentication = config.Authentication, StoreLocked = false });
+        }
+        catch (VaultLockedException) { Update(s => s with { StoreAuthentication = StoreAuthentication.Password, StoreLocked = true }); }
+        catch (SecretsOperationException) { /* unknown: no padlock */ }
+    }
 
     /// <summary>Whether a SecretStore with a password is in use (only that can be locked).</summary>
     async Task<bool> StoreHasPasswordAsync()

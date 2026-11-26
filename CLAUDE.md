@@ -114,6 +114,9 @@ run the UI test with `-ExePath` on the installed exe. Verifying only the Debug b
 - **PowerShell `switch` and `$x = if (…)`** unroll a `byte[]` (seen in the WindowsVault module): use if/elseif and plain
   assignment. An extension vault's Get-Secret must return the `.PSObject.BaseObject`, and a plain `[hashtable]` (ConvertFrom-Json
   -AsHashtable gives an ordered one).
+- **Lock state** (`AppState.LockStatusOf`): SecretStore has one, shared lock (`StoreLocked`, probed at startup without prompting);
+  other vaults show Locked only when they reported it. Lock/Unlock live next to the vault name and appear only when they do
+  something; Unlock (button or automatic prompt) tries Windows Hello first and asks again after a wrong password.
 - **Screenshots:** capture **only the app window** (`PrintWindow` on its handle). Never capture the screen; it can expose the user's
   other windows.
 

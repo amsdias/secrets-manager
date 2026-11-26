@@ -87,6 +87,9 @@ public sealed record ViewerState(SecretEntry Entry, SecretValue Value, bool Reve
 
 public enum VaultKind { SecretStore, WindowsAccount, Other }
 
+/// <summary>What the padlock shows. NoPassword: nothing to lock (Windows-account vault, SecretStore without a password).</summary>
+public enum LockStatus { Unknown, NoPassword, Locked, Unlocked }
+
 public sealed record VaultFormState
 {
     /// <summary>SecretStore: password or Windows account (one per user). WindowsAccount: the app's DPAPI vault, never asks.</summary>
@@ -122,6 +125,8 @@ public sealed record AppState
     public bool IsStoreMissing { get; init; }
     /// <summary>SecretStore authentication mode, known once a SecretStore vault has loaded (null = unknown).</summary>
     public StoreAuthentication? StoreAuthentication { get; init; }
+    /// <summary>The SecretStore (shared by every SecretStore vault) is locked; null = not known yet.</summary>
+    public bool? StoreLocked { get; init; }
     public bool HasLoaded { get; init; }
     public int BusyCount { get; init; }
     public string Status { get; init; } = "Starting…";
@@ -150,6 +155,22 @@ public sealed record AppState
     /// a SecretStore without a password) never are; SecretManagement silently accepts any "unlock" password for them.
     /// </summary>
     public bool CanUnlock => CurrentVault is not null && IsVaultLocked && !IsStoreMissing;
+
+    public LockStatus LockStatusOf(VaultInfo vault)
+    {
+        if (vault.IsSecretStore)
+            return IsStoreMissing && vault.Name == SelectedVault ? LockStatus.Unknown
+                : StoreAuthentication switch
+                {
+                    Core.StoreAuthentication.None => LockStatus.NoPassword,
+                    Core.StoreAuthentication.Password => StoreLocked == true ? LockStatus.Locked : LockStatus.Unlocked,
+                    _ => LockStatus.Unknown,
+                };
+        if (vault.Name == SelectedVault && IsVaultLocked) return LockStatus.Locked;
+        return vault.IsWindowsVault ? LockStatus.NoPassword : LockStatus.Unknown;
+    }
+
+    public LockStatus CurrentLockStatus => CurrentVault is { } v ? LockStatusOf(v) : LockStatus.Unknown;
 
     public bool HasPanel => Editor is not null || Viewer is not null || VaultForm is not null || StoreSettings is not null || IsSettingsOpen;
 

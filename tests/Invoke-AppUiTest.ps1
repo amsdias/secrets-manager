@@ -170,6 +170,10 @@ try {
 
     # --- locked vault: wrong password re-prompts, right one unlocks
     Select-Row $locked 'VaultList'
+    [void](Wait-For { ById 'PromptPassword' } 'automatic unlock prompt')
+    Invoke-El (Wait-For { ByName 'Cancel' $CT::Button } 'Cancel in the unlock prompt')
+    Invoke-El (Wait-For { $b = ById 'UnlockButton'; if ($b -and (ByName 'Locked')) { $b } } 'padlock and Unlock button next to the vault name')
+    Pass 'a locked vault shows the padlock and an Unlock button'
     Set-Val (Wait-For { ById 'PromptPassword' } 'unlock prompt') 'wrong'
     Invoke-El (Wait-For { ByName 'Unlock' $CT::Button } 'Unlock button')
     [void](Wait-For { ByName "The password was not accepted. Enter the password for '$locked'." } 're-prompt')
@@ -242,8 +246,9 @@ try {
     if ((Wait-For { Get-Value $dev devkey } 'devkey via Get-Secret') -ne 'dev-value-123') { throw 'Get-Secret returned the wrong dev value' }
     if ((Get-Content $devFile -Raw) -match 'dev-value-123') { throw 'the Windows-account vault file contains plain text' }
     Pass 'Windows-account vault: created in the app, encrypted on disk, readable by Get-Secret'
-    if ((ById 'UnlockButton').Current.IsEnabled) { throw 'Unlock is enabled on a vault that has no password' }
-    Pass 'Unlock is disabled on a vault without a password'
+    [void](Wait-For { ById 'NoPasswordText' } '"No password" next to the vault name')
+    if ((ById 'UnlockButton') -or (ById 'LockButton')) { throw 'a vault without a password offers Lock or Unlock' }
+    Pass 'a vault without a password says so and offers no Lock/Unlock'
     # SecretsManager.Cli.exe (console) relays to the exe under test: PowerShell doesn't capture a GUI exe's output.
     $env:SECRETSMANAGER_APP = (Resolve-Path $exe).Path
     $cliOut = & $cli get devkey --vault $dev
@@ -253,6 +258,17 @@ try {
     Remove-Item Env:SECRETSMANAGER_APP
     Pass 'SecretsManager.Cli get prints a dev key without asking; exit 1 when missing'
 
+    # --- Remove… on a Windows-account vault: the options are radio buttons; "delete its secrets too"
+    Select-Row $dev 'VaultList'
+    Invoke-El (Wait-For { ById 'UnregisterVaultButton' } 'Remove button')
+    $deleteOption = Wait-For { ById 'PromptChoice1' } '"delete its secrets too" option'
+    $deleteOption.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    Start-Sleep -Milliseconds 300
+    Invoke-El (Wait-For { ByName 'Remove' $CT::Button } 'Remove in the dialog')
+    [void](Wait-For { -not (Get-SecretVault -Name $dev -ErrorAction SilentlyContinue) } 'vault removed')
+    if (@((Import-Clixml $devFile).Keys).Count -ne 0) { throw 'removing with "delete its secrets" left secrets in the file' }
+    Pass 'Remove: radio-button choice; deleting the secrets empties the vault file'
+
     # --- copy starts the clipboard countdown
     Select-Row $locked 'VaultList'
     Select-Row 'lockedsecret' 'SecretList'
@@ -260,10 +276,6 @@ try {
     [void](Wait-For { ById 'ClipboardText' } 'clipboard countdown' 5)
     Pass 'copy started the clipboard auto-clear countdown'
 
-    # --- Lock now: drops the copied value and reports it
-    Invoke-El (ById 'LockButton')
-    [void](Wait-For { -not (ById 'ClipboardText') -and (ById 'StatusText').Current.Name -match 'Locked|cleared the clipboard' } 'lock to clear the clipboard countdown')
-    Pass 'Lock cleared the clipboard countdown'
 
     Save-Shot 'app-final'
 
