@@ -46,7 +46,7 @@ jobs:
           if (($files.Name | Sort-Object) -join ',' -ne 'SecretsManager.Cli.exe,SecretsManager.exe') { throw "unexpected publish output: $($files.Name -join ', ')" }
 
       - name: Upload build
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: SecretsManager-win-x64
           path: publish/*.exe
